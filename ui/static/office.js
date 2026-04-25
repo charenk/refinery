@@ -219,8 +219,37 @@
   hud.appendChild(statusBox);
   hud.appendChild(ctrlBox);
 
+  // First-run banner. Hidden by default; shown if /api/onboarding/status
+  // reports has_holdings: false. Sits above the canvas.
+  const banner = document.createElement('div');
+  banner.id = 'office-onboarding-banner';
+  banner.style.cssText = 'display:none;background:#3e5c4a;color:#f5f5ee;border:1px solid #5e7a68;border-radius:6px;margin-bottom:8px;padding:10px 14px;font-family:monospace;font-size:13px;line-height:1.5;';
+  panel.appendChild(banner);
   panel.appendChild(canvas);
   panel.appendChild(hud);
+
+  fetch('/api/onboarding/status')
+    .then(response => response.ok ? response.json() : null)
+    .then(status => {
+      if (!status) return;
+      if (!status.has_holdings) {
+        banner.innerHTML =
+          '<strong>Welcome to The Refinery.</strong> ' +
+          'Add your first holding to get a morning report tomorrow. ' +
+          '<a href="#" id="office-banner-link" style="color:#fbbf24;text-decoration:underline;">Open the Portfolio tab</a>.';
+        banner.style.display = 'block';
+        const link = document.getElementById('office-banner-link');
+        if (link) {
+          link.addEventListener('click', function (event) {
+            event.preventDefault();
+            const portfolioBtn = Array.from(document.querySelectorAll('.tab-btn'))
+              .find(btn => btn.textContent.trim() === 'Portfolio');
+            if (portfolioBtn) portfolioBtn.click();
+          });
+        }
+      }
+    })
+    .catch(function () { /* fail silent: a missing endpoint just hides the banner */ });
 
   const ctx = canvas.getContext('2d');
 
