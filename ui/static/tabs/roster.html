@@ -1,0 +1,156 @@
+<!-- Pending changes panel -->
+<div id="pending-panel"></div>
+
+<!-- Add ticker form -->
+<div class="card" style="margin-bottom: 16px;">
+  <div class="card-title">ADD TICKER</div>
+  <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+    <input type="text" id="add-ticker-input" class="input" placeholder="Ticker symbol" style="width: 120px;">
+    <select id="add-ticker-cat" class="input" style="width: 200px;">
+      <option value="">Select category...</option>
+    </select>
+    <button class="btn" onclick="rosterAddTicker()">Add</button>
+  </div>
+</div>
+
+<!-- Category grid -->
+<div class="cat-grid" id="roster-grid"></div>
+
+<script>
+(function() {
+  const LABELS = {
+    broad_etf: 'Broad ETF',
+    sector_etf: 'Sector ETF',
+    us_large_cap_growth: 'US Large Cap Growth',
+    us_mid_cap_momentum: 'US Mid Cap Momentum',
+    us_financials_rates: 'US Financials / Rates',
+    canadian_large_cap: 'Canadian Large Cap',
+    canadian_energy: 'Canadian Energy',
+    canadian_financials: 'Canadian Financials',
+    thematic_speculative: 'Thematic / Speculative',
+    macro_alternatives: 'Macro Alternatives'
+  };
+
+  window.rosterAddTicker = function() {
+    const ticker = document.getElementById('add-ticker-input').value.trim();
+    const cat = document.getElementById('add-ticker-cat').value;
+    if (!ticker || !cat) return;
+    fetch('/api/roster/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ticker: ticker, category: cat})
+    }).then(() => {
+      document.getElementById('add-ticker-input').value = '';
+      loadRoster();
+    });
+  };
+
+  window.loadRoster = function() {
+    fetch('/api/roster')
+      .then(r => r.json())
+      .then(data => {
+        // Populate category dropdown
+        const sel = document.getElementById('add-ticker-cat');
+        if (sel.options.length <= 1) {
+          Object.keys(data.categories).forEach(key => {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = LABELS[key] || key;
+            sel.appendChild(opt);
+          });
+        }
+
+        // Pending changes
+        const pp = document.getElementById('pending-panel');
+        const pending = data.pending_changes || [];
+        if (pending.length > 0) {
+          pp.innerHTML = '<div class="card"><div class="card-title">PENDING CHANGES</div>' +
+            pending.map(c => `
+              <div class="pending-card">
+                <div style="font-family:monospace; font-size:14px;">
+                  <span style="color:#f87171">Evict ${c.evict || '?'}</span>
+                  <span style="color:#6a6040"> &rarr; </span>
+                  <span style="color:#4ade80">Add ${c.replace || '?'}</span>
+                  <span class="badge badge-neutral">${c.category || ''}</span>
+                </div>
+                <div class="pending-reason">${c.reason || ''}</div>
+                <div style="display:flex; gap:6px; margin-top:6px;">
+                  <button class="btn btn-approve" onclick="rosterApprove('${c.evict}')">Approve</button>
+                  <button class="btn btn-reject" onclick="rosterReject('${c.evict}')">Reject</button>
+                </div>
+              </div>
+            `).join('') +
+          '</div>';
+        } else {
+          pp.innerHTML = '';
+        }
+
+        // Category cards
+        const grid = document.getElementById('roster-grid');
+        grid.innerHTML = '';
+        Object.entries(data.categories).forEach(([key, cat]) => {
+          const label = LABELS[key] || key;
+          const tickers = cat.tickers || [];
+          const active = cat.active_tier || [];
+          const pinned = cat.pinned || [];
+
+          const card = document.createElement('div');
+          card.className = 'card cat-card';
+          card.innerHTML = `
+            <div class="card-title">${label.toUpperCase()}</div>
+            ${tickers.length === 0 ? '<div style="font-size:13px;color:#444;font-family:monospace;">No tickers</div>' :
+              tickers.map(t => {
+                const isActive = active.includes(t);
+                const isPinned = pinned.includes(t);
+                return `<div class="ticker-row">
+                  <span class="ticker-name" style="color:${isActive ? '#c8a050' : '#888'}">${t}</span>
+                  ${isActive ? '<span class="badge badge-active">ACTIVE</span>' : '<span class="badge badge-watch">WATCH</span>'}
+                  ${isPinned ? '<span class="badge badge-pinned">PINNED</span>' : ''}
+                  <span class="ticker-actions">
+                    <button class="btn-icon" title="Pin" onclick="rosterPin('${t}','${key}')">&#x1f512;</button>
+                    <button class="btn-icon" title="Remove" onclick="rosterRemove('${t}','${key}')">&#x1f5d1;</button>
+                  </span>
+                </div>`;
+              }).join('')
+            }
+          `;
+          grid.appendChild(card);
+        });
+      });
+  };
+
+  window.rosterApprove = function(evict) {
+    fetch('/api/roster/approve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({evict: evict})
+    }).then(() => loadRoster());
+  };
+
+  window.rosterReject = function(evict) {
+    fetch('/api/roster/reject', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({evict: evict})
+    }).then(() => loadRoster());
+  };
+
+  window.rosterRemove = function(ticker, category) {
+    fetch('/api/roster/remove', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ticker: ticker, category: category})
+    }).then(() => loadRoster());
+  };
+
+  window.rosterPin = function(ticker, category) {
+    fetch('/api/roster/pin', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ticker: ticker, category: category})
+    }).then(() => loadRoster());
+  };
+
+  loadRoster();
+})();
+</script>

@@ -1,0 +1,40 @@
+# Secrets and personal data
+.env
+.env.local
+.env.*.local
+
+# Runtime data (user-specific)
+memory/refinery.db
+memory/refinery.db-journal
+memory/refinery.db-wal
+memory/refinery.db-shm
+memory/portfolio.json
+memory/strategy_experiments.json
+memory/market_regime.json
+outputs/*
+!outputs/.gitkeep
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/settings.json
+.vscode/launch.json
+*.swp
+*.swo
+
+# Build / dist
+build/
+dist/
+*.egg

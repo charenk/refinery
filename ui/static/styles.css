@@ -1,0 +1,130 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0e0e0a; color: #c8c0a0; font-family: system-ui, sans-serif; }
+
+.tab-nav {
+  position: relative;
+  display: flex; align-items: center; justify-content: center; gap: 2px;
+  background: #111108; border-bottom: 1px solid #3a3a20;
+  padding: 8px 16px;
+}
+.nav-logo {
+  position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+  font-size: 16px; font-weight: 600; color: #c8a050;
+  font-family: monospace; letter-spacing: .05em;
+}
+.tab-btn {
+  background: transparent; border: 0.5px solid transparent;
+  color: #666; padding: 5px 14px; border-radius: 4px;
+  font-size: 14px; cursor: pointer; font-family: monospace;
+}
+.tab-btn:hover { color: #aaa; background: #1a1a10; }
+.tab-btn.active { color: #c8a050; border-color: #6a5020; background: #1a1808; }
+
+main { padding: 16px; max-width: 1200px; margin: 0 auto; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* Shared card style */
+.card {
+  background: #161610; border: 0.5px solid #2a2a1a;
+  border-radius: 8px; padding: 16px; margin-bottom: 12px;
+}
+.card-title {
+  font-size: 13px; color: #6a6040; font-family: monospace;
+  letter-spacing: .08em; margin-bottom: 10px;
+}
+
+/* Status badges */
+.badge {
+  font-size: 11px; padding: 1px 6px; border-radius: 2px;
+  font-family: monospace; font-weight: 500; display: inline-block;
+}
+.badge-active  { background: #0a2a0a; color: #4ade80; }
+.badge-watch   { background: #1a1a0a; color: #8a8a50; }
+.badge-pinned  { background: #0a1a2a; color: #60a5fa; }
+.badge-leading { background: #0a2a0a; color: #4ade80; }
+.badge-lagging { background: #2a0a0a; color: #f87171; }
+.badge-neutral { background: #1a1a10; color: #a0a080; }
+
+/* Brief viewer */
+#brief-content {
+  font-family: monospace; font-size: 14px; line-height: 1.7;
+  color: #c8c0a0; white-space: pre-wrap;
+}
+
+/* Tables */
+table {
+  width: 100%; border-collapse: collapse;
+  font-family: monospace; font-size: 14px;
+}
+th {
+  text-align: left; padding: 6px 10px;
+  color: #6a6040; border-bottom: 1px solid #2a2a1a;
+  font-size: 12px; letter-spacing: .05em;
+}
+td {
+  padding: 6px 10px; border-bottom: 1px solid #1a1a10;
+}
+tr:hover { background: #1a1a10; }
+
+/* Buttons */
+.btn {
+  background: #1a1808; border: 0.5px solid #3a3a20;
+  color: #c8a050; padding: 4px 12px; border-radius: 4px;
+  font-size: 13px; cursor: pointer; font-family: monospace;
+}
+.btn:hover { background: #2a2810; }
+.btn-approve { border-color: #2a4a2a; color: #4ade80; }
+.btn-approve:hover { background: #0a2a0a; }
+.btn-reject { border-color: #4a2a2a; color: #f87171; }
+.btn-reject:hover { background: #2a0a0a; }
+.btn-icon {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; padding: 2px 4px; opacity: 0.5;
+}
+.btn-icon:hover { opacity: 1; }
+
+/* Form inputs */
+.input {
+  background: #111108; border: 0.5px solid #2a2a1a;
+  color: #c8c0a0; padding: 4px 8px; border-radius: 4px;
+  font-size: 14px; font-family: monospace;
+}
+.input:focus { outline: none; border-color: #6a5020; }
+
+select.input {
+  appearance: none; padding-right: 20px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%236a6040'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+
+/* P&L coloring */
+.pl-pos { color: #4ade80; }
+.pl-neg { color: #f87171; }
+
+/* Canvas wrapper */
+#office-canvas { display: block; margin: 0 auto; image-rendering: pixelated; }
+
+/* Pending changes */
+.pending-card {
+  background: #1a1808; border: 0.5px solid #4a3a10;
+  border-radius: 6px; padding: 12px; margin-bottom: 8px;
+}
+.pending-reason {
+  font-size: 13px; color: #a09060; margin: 6px 0;
+  font-family: monospace;
+}
+
+/* Category cards grid */
+.cat-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.cat-card { padding: 12px; }
+.cat-card .ticker-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 0; font-family: monospace; font-size: 14px;
+}
+.ticker-row .ticker-name { flex: 1; }
+.ticker-actions { display: flex; gap: 2px; }

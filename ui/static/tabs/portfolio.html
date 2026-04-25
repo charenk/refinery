@@ -1,0 +1,102 @@
+<div class="card">
+  <div style="display: flex; align-items: center; justify-content: space-between;">
+    <div class="card-title">PORTFOLIO HOLDINGS</div>
+    <button class="btn" id="portfolio-refresh-btn" onclick="refreshPortfolioPrices()">Refresh</button>
+  </div>
+  <div id="portfolio-table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>TICKER</th>
+          <th>EXCHANGE</th>
+          <th>SHARES</th>
+          <th>AVG COST (CAD)</th>
+          <th>BOOK VALUE</th>
+          <th>CURRENT PRICE</th>
+          <th>P&L %</th>
+          <th>CURRENCY</th>
+          <th>STOP</th>
+          <th>TARGET 1</th>
+        </tr>
+      </thead>
+      <tbody id="portfolio-body"></tbody>
+    </table>
+  </div>
+  <div id="portfolio-summary" style="margin-top: 12px; font-size: 13px; color: #6a6040; font-family: monospace;"></div>
+</div>
+
+<script>
+(function() {
+  function renderPortfolio(data) {
+    var tbody = document.getElementById('portfolio-body');
+    var summary = document.getElementById('portfolio-summary');
+    tbody.innerHTML = '';
+
+    var totalBook = 0;
+    data.holdings.forEach(function(h) {
+      totalBook += h.book_value_cad;
+
+      var priceCell = '-';
+      if (h.current_price != null) {
+        priceCell = '$' + h.current_price.toFixed(2);
+        if (h.current_price_cad != null && h.currency === 'USD') {
+          priceCell += ' <span style="color:#6a6040;font-size:12px">(C$' + h.current_price_cad.toFixed(2) + ')</span>';
+        }
+      }
+
+      var pnlCell = '-';
+      if (h.pnl_pct != null) {
+        var pnlColor = h.pnl_pct >= 0 ? '#4ade80' : '#f87171';
+        var sign = h.pnl_pct >= 0 ? '+' : '';
+        pnlCell = '<span style="color:' + pnlColor + ';font-weight:600">' + sign + h.pnl_pct.toFixed(2) + '%</span>';
+      }
+
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td style="color:#c8a050; font-weight:600">' + h.ticker + '</td>' +
+        '<td>' + h.exchange + '</td>' +
+        '<td>' + h.quantity.toFixed(4) + '</td>' +
+        '<td>$' + h.avg_cost_cad.toFixed(2) + '</td>' +
+        '<td>$' + h.book_value_cad.toLocaleString('en-CA', {minimumFractionDigits: 2}) + '</td>' +
+        '<td>' + priceCell + '</td>' +
+        '<td>' + pnlCell + '</td>' +
+        '<td>' + h.currency + '</td>' +
+        '<td>' + (h.stop_cad ? '$' + h.stop_cad.toFixed(2) : '-') + '</td>' +
+        '<td>' + (h.target_1_cad ? '$' + h.target_1_cad.toFixed(2) : '-') + '</td>';
+      tbody.appendChild(tr);
+    });
+
+    var usdLine = data.usd_cad ? ' | USD/CAD: ' + data.usd_cad.toFixed(4) : '';
+    summary.textContent =
+      data.holdings.length + ' positions | Total book: $' +
+      totalBook.toLocaleString('en-CA', {minimumFractionDigits: 2}) +
+      usdLine +
+      ' | Updated: ' + data.last_updated;
+  }
+
+  window.loadPortfolio = function() {
+    fetch('/api/portfolio')
+      .then(function(r) { return r.json(); })
+      .then(renderPortfolio);
+  };
+
+  window.refreshPortfolioPrices = function() {
+    var btn = document.getElementById('portfolio-refresh-btn');
+    btn.textContent = 'Fetching prices...';
+    btn.style.opacity = '0.5';
+    fetch('/api/portfolio/prices')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        renderPortfolio(data);
+        btn.textContent = 'Refresh';
+        btn.style.opacity = '1';
+      })
+      .catch(function() {
+        btn.textContent = 'Refresh';
+        btn.style.opacity = '1';
+      });
+  };
+
+  loadPortfolio();
+})();
+</script>

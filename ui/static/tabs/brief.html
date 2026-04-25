@@ -1,0 +1,44 @@
+<div class="card">
+  <div class="card-title">DAILY BRIEF</div>
+  <div style="margin-bottom: 10px;">
+    <select id="brief-select" class="input" onchange="loadBrief(this.value)">
+      <option value="">Loading...</option>
+    </select>
+  </div>
+  <div id="brief-content"></div>
+</div>
+
+<script>
+(function() {
+  const sel = document.getElementById('brief-select');
+  const content = document.getElementById('brief-content');
+
+  // Load brief list
+  fetch('/api/briefs')
+    .then(r => r.json())
+    .then(files => {
+      sel.innerHTML = '';
+      if (files.length === 0) {
+        sel.innerHTML = '<option>No briefs yet</option>';
+        return;
+      }
+      files.forEach((f, i) => {
+        const opt = document.createElement('option');
+        opt.value = f;
+        opt.textContent = f.replace('_brief.md', '');
+        sel.appendChild(opt);
+      });
+      // Load the first (latest) brief
+      loadBrief(files[0]);
+    });
+
+  window.loadBrief = function(filename) {
+    if (!filename) return;
+    fetch('/api/brief/' + filename)
+      .then(r => r.json())
+      .then(data => {
+        content.textContent = data.content;
+      });
+  };
+})();
+</script>

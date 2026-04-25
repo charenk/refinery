@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Refinery</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+  <nav class="tab-nav">
+    <div class="nav-logo">The Refinery</div>
+    <button class="tab-btn active" onclick="showTab('office', this)">Office</button>
+    <button class="tab-btn" onclick="showTab('brief', this)">Morning Report</button>
+    <button class="tab-btn" onclick="showTab('portfolio', this)">Portfolio</button>
+    <button class="tab-btn" onclick="showTab('roster', this)">Roster</button>
+    <button class="tab-btn" onclick="showTab('performance', this)">Performance</button>
+  </nav>
+  <main>
+    <div id="tab-office" class="tab-panel active"></div>
+    <div id="tab-brief" class="tab-panel"></div>
+    <div id="tab-portfolio" class="tab-panel"></div>
+    <div id="tab-roster" class="tab-panel"></div>
+    <div id="tab-performance" class="tab-panel"></div>
+  </main>
+
+  <script src="office.js"></script>
+  <script src="roster.js"></script>
+
+  <script>
+    /* ── Tab loader ─────────────────────────────────────────── */
+    const loaded = {};
+
+    function showTab(name, btn) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + name).classList.add('active');
+      if (btn) btn.classList.add('active');
+
+      // Lazy-load tab content
+      if (!loaded[name] && name !== 'office') {
+        loaded[name] = true;
+        fetch('tabs/' + name + '.html')
+          .then(r => r.text())
+          .then(html => {
+            document.getElementById('tab-' + name).innerHTML = html;
+            // Run any inline scripts in the loaded HTML
+            document.getElementById('tab-' + name).querySelectorAll('script').forEach(s => {
+              const ns = document.createElement('script');
+              ns.textContent = s.textContent;
+              document.body.appendChild(ns);
+            });
+          });
+      }
+    }
+  </script>
+</body>
+</html>

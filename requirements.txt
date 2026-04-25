@@ -1,0 +1,22 @@
+# Core agent stack
+anthropic~=0.94
+python-dotenv~=1.0
+
+# Market data
+yfinance~=0.2.40
+pandas~=2.2
+pandas-ta>=0.4.0b0
+ta~=0.11
+feedparser~=6.0
+requests~=2.32
+fredapi~=0.5
+
+# Scheduler and console output
+schedule~=1.2
+tabulate~=0.9
+pytz~=2024.1
+
+# UI server
+flask~=3.0
+flask-socketio~=5.3
+eventlet~=0.41

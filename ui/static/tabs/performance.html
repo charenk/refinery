@@ -1,0 +1,169 @@
+<div class="card">
+  <div class="card-title">RECENT SIGNALS</div>
+  <table>
+    <thead>
+      <tr>
+        <th>DATE</th>
+        <th>TICKER</th>
+        <th>SETUP</th>
+        <th>QUALITY</th>
+        <th>OUTCOME</th>
+        <th>P&L %</th>
+      </tr>
+    </thead>
+    <tbody id="signals-body"></tbody>
+  </table>
+  <div id="no-signals" style="display:none; font-size:13px; color:#444; font-family:monospace; padding:12px;">
+    No signals recorded yet. Run a scan to generate data.
+  </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
+  <div class="card">
+    <div class="card-title">WIN RATE BY SETUP TYPE</div>
+    <canvas id="chart-setup" height="200"></canvas>
+  </div>
+  <div class="card">
+    <div class="card-title">WIN RATE BY CATEGORY</div>
+    <canvas id="chart-category" height="200"></canvas>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Load Chart.js from CDN
+  if (!window.Chart) {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+    s.onload = loadPerformance;
+    document.head.appendChild(s);
+  } else {
+    loadPerformance();
+  }
+
+  function loadPerformance() {
+    fetch('/api/signals?limit=100')
+      .then(r => r.json())
+      .then(signals => {
+        const tbody = document.getElementById('signals-body');
+        const noSig = document.getElementById('no-signals');
+
+        if (!signals || signals.length === 0) {
+          noSig.style.display = 'block';
+          renderEmptyCharts();
+          return;
+        }
+
+        noSig.style.display = 'none';
+        tbody.innerHTML = '';
+        signals.slice(0, 50).forEach(s => {
+          const pl = s.pnl_pct != null ? s.pnl_pct : null;
+          const plClass = pl != null ? (pl >= 0 ? 'pl-pos' : 'pl-neg') : '';
+          const outcomeColor = s.outcome === 'win' ? '#4ade80' : s.outcome === 'loss' ? '#f87171' : '#888';
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${s.date || '-'}</td>
+            <td style="color:#c8a050">${s.ticker || '-'}</td>
+            <td>${s.setup_type || '-'}</td>
+            <td>${s.quality_score != null ? s.quality_score : '-'}</td>
+            <td style="color:${outcomeColor}">${s.outcome || 'pending'}</td>
+            <td class="${plClass}">${pl != null ? pl.toFixed(1) + '%' : '-'}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        // Build charts
+        buildCharts(signals);
+      });
+  }
+
+  function buildCharts(signals) {
+    if (!window.Chart) return;
+
+    const resolved = signals.filter(s => s.outcome === 'win' || s.outcome === 'loss');
+
+    // Win rate by setup type
+    const setupMap = {};
+    resolved.forEach(s => {
+      const key = s.setup_type || 'unknown';
+      if (!setupMap[key]) setupMap[key] = {wins: 0, total: 0};
+      setupMap[key].total++;
+      if (s.outcome === 'win') setupMap[key].wins++;
+    });
+
+    const setupLabels = Object.keys(setupMap);
+    const setupRates = setupLabels.map(k => ((setupMap[k].wins / setupMap[k].total) * 100).toFixed(1));
+
+    new Chart(document.getElementById('chart-setup'), {
+      type: 'bar',
+      data: {
+        labels: setupLabels,
+        datasets: [{
+          label: 'Win Rate %',
+          data: setupRates,
+          backgroundColor: '#c8a050',
+          borderRadius: 3
+        }]
+      },
+      options: chartOpts()
+    });
+
+    // Win rate by category
+    const catMap = {};
+    resolved.forEach(s => {
+      const key = s.category || 'unknown';
+      if (!catMap[key]) catMap[key] = {wins: 0, total: 0};
+      catMap[key].total++;
+      if (s.outcome === 'win') catMap[key].wins++;
+    });
+
+    const catLabels = Object.keys(catMap);
+    const catRates = catLabels.map(k => ((catMap[k].wins / catMap[k].total) * 100).toFixed(1));
+
+    new Chart(document.getElementById('chart-category'), {
+      type: 'bar',
+      data: {
+        labels: catLabels,
+        datasets: [{
+          label: 'Win Rate %',
+          data: catRates,
+          backgroundColor: '#4A8ADD',
+          borderRadius: 3
+        }]
+      },
+      options: chartOpts()
+    });
+  }
+
+  function renderEmptyCharts() {
+    if (!window.Chart) return;
+    ['chart-setup', 'chart-category'].forEach(id => {
+      new Chart(document.getElementById(id), {
+        type: 'bar',
+        data: { labels: ['No data'], datasets: [{ data: [0], backgroundColor: '#333' }] },
+        options: chartOpts()
+      });
+    });
+  }
+
+  function chartOpts() {
+    return {
+      responsive: true,
+      plugins: {
+        legend: { display: false }
+      },
+      scales: {
+        y: {
+          beginAtZero: true, max: 100,
+          ticks: { color: '#6a6040', font: { family: 'monospace', size: 12 } },
+          grid: { color: '#1a1a10' }
+        },
+        x: {
+          ticks: { color: '#6a6040', font: { family: 'monospace', size: 12 } },
+          grid: { display: false }
+        }
+      }
+    };
+  }
+})();
+</script>

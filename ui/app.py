@@ -1,0 +1,288 @@
+"""Flask + Socket.IO server for The Refinery dashboard.
+
+Serves five tabs at http://127.0.0.1:5173 by default:
+
+  Office       Pixel-art room where eight agents animate during a live scan.
+  Morning Report   The latest brief that the system produced.
+  Portfolio    Your current holdings with live prices and unrealised PnL.
+  Roster       The 100-ticker watchlist organised into ten categories.
+  Performance  Win-rate and signal-history charts.
+
+Security defaults:
+  - Binds to 127.0.0.1 only. To expose on the local network, set
+    REFINERY_UI_HOST=0.0.0.0 in the environment. (Anyone on the same Wi-Fi
+    can then read your portfolio and trigger scans, so know what you are
+    opting into.)
+  - The trigger_scan socket event runs only the in-process orchestrator. It
+    does NOT spawn arbitrary subprocesses based on user input.
+"""
+
+import glob as glob_module
+import json
+import logging
+import os
+import sys
+
+from flask import Flask, jsonify, request
+from flask_socketio import SocketIO, emit
+
+# Make the parent directory importable so `from agents` etc. work when this
+# file is run directly (`python ui/app.py`).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from agents import memory_agent
+from ui import events
+
+logger = logging.getLogger(__name__)
+
+REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
+PORTFOLIO_PATH = os.path.join(REPO_ROOT, "memory", "portfolio.json")
+ROSTER_PATH = os.path.join(REPO_ROOT, "memory", "roster.json")
+OUTPUTS_DIR = os.path.join(REPO_ROOT, "outputs")
+
+ALLOWED_SCAN_TYPES = {"daily", "overnight", "open_watch", "midday", "eod", "pulse", "weekly"}
+
+app = Flask(__name__, static_folder="static", static_url_path="", template_folder="static")
+# Per-process secret. Sessions do not survive restarts, which is fine for a
+# local-only single-user dashboard.
+app.config["SECRET_KEY"] = os.urandom(24)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+# Register the socket instance so agents can emit events into the UI.
+events.register(socketio)
+
+
+def _read_json_or_default(path: str, default: dict) -> dict:
+    """Read a JSON file. Return `default` if the file is missing or unreadable."""
+    try:
+        with open(path) as file_handle:
+            return json.load(file_handle)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+
+
+def _write_json(path: str, data: dict) -> None:
+    """Write JSON to `path` with indentation. Parent directory must exist."""
+    with open(path, "w") as file_handle:
+        json.dump(data, file_handle, indent=2)
+
+
+# Tab routes ──────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def serve_index():
+    return app.send_static_file("index.html")
+
+
+# API endpoints (consumed by the JS tabs) ─────────────────────────────────────
+
+@app.route("/api/portfolio")
+def api_portfolio():
+    portfolio = _read_json_or_default(
+        PORTFOLIO_PATH,
+        {"holdings": [], "cash_available": 0, "currency": "CAD", "_note": "Create memory/portfolio.json from memory/portfolio.example.json."},
+    )
+    return jsonify(portfolio)
+
+
+@app.route("/api/roster")
+def api_roster():
+    roster = _read_json_or_default(
+        ROSTER_PATH,
+        {"categories": {}, "pending_changes": [], "_note": "Roster will be initialized on first scan."},
+    )
+    return jsonify(roster)
+
+
+@app.route("/api/signals")
+def api_signals():
+    limit = request.args.get("limit", default=50, type=int)
+    rows = memory_agent.get_recent_signals(limit=limit)
+    return jsonify(rows)
+
+
+@app.route("/api/brief/latest")
+def api_brief_latest():
+    files = sorted(glob_module.glob(os.path.join(OUTPUTS_DIR, "*_brief.md")), reverse=True)
+    if not files:
+        return jsonify({"content": "No briefs yet. Run `python run_daily.py` to generate one."})
+    with open(files[0]) as file_handle:
+        return jsonify({"date": os.path.basename(files[0]), "content": file_handle.read()})
+
+
+@app.route("/api/briefs")
+def api_briefs():
+    files = sorted(glob_module.glob(os.path.join(OUTPUTS_DIR, "*_brief.md")), reverse=True)
+    return jsonify([os.path.basename(f) for f in files])
+
+
+@app.route("/api/brief/<filename>")
+def api_brief_by_name(filename: str):
+    # Reject any path traversal.
+    if "/" in filename or "\\" in filename or filename.startswith("."):
+        return jsonify({"error": "Invalid filename"}), 400
+    path = os.path.join(OUTPUTS_DIR, filename)
+    if not os.path.isfile(path):
+        return jsonify({"error": "Brief not found"}), 404
+    with open(path) as file_handle:
+        return jsonify({"date": filename, "content": file_handle.read()})
+
+
+@app.route("/api/roster/approve", methods=["POST"])
+def api_roster_approve():
+    data = request.json or {}
+    roster = _read_json_or_default(ROSTER_PATH, {"pending_changes": []})
+    for change in roster.get("pending_changes", []):
+        if change.get("evict") == data.get("evict"):
+            change["status"] = "approved"
+    _write_json(ROSTER_PATH, roster)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/roster/reject", methods=["POST"])
+def api_roster_reject():
+    data = request.json or {}
+    roster = _read_json_or_default(ROSTER_PATH, {"pending_changes": []})
+    roster["pending_changes"] = [
+        change for change in roster.get("pending_changes", [])
+        if change.get("evict") != data.get("evict")
+    ]
+    _write_json(ROSTER_PATH, roster)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/roster/add", methods=["POST"])
+def api_roster_add():
+    data = request.json or {}
+    ticker = str(data.get("ticker", "")).upper().strip()
+    category = str(data.get("category", "")).strip()
+    if not ticker or not category:
+        return jsonify({"error": "ticker and category are required"}), 400
+    roster = _read_json_or_default(ROSTER_PATH, {"categories": {}})
+    cat = roster.get("categories", {}).get(category)
+    if not cat:
+        return jsonify({"error": "Invalid category"}), 400
+    if ticker not in cat.get("tickers", []):
+        cat.setdefault("tickers", []).append(ticker)
+        cat.setdefault("watch_tier", []).append(ticker)
+    _write_json(ROSTER_PATH, roster)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/roster/remove", methods=["POST"])
+def api_roster_remove():
+    data = request.json or {}
+    ticker = str(data.get("ticker", "")).upper().strip()
+    category = str(data.get("category", "")).strip()
+    roster = _read_json_or_default(ROSTER_PATH, {"categories": {}})
+    cat = roster.get("categories", {}).get(category)
+    if cat:
+        for tier_key in ("tickers", "active_tier", "watch_tier"):
+            if ticker in cat.get(tier_key, []):
+                cat[tier_key].remove(ticker)
+    _write_json(ROSTER_PATH, roster)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/roster/pin", methods=["POST"])
+def api_roster_pin():
+    data = request.json or {}
+    ticker = str(data.get("ticker", "")).upper().strip()
+    category = str(data.get("category", "")).strip()
+    roster = _read_json_or_default(ROSTER_PATH, {"categories": {}})
+    cat = roster.get("categories", {}).get(category)
+    if cat:
+        cat.setdefault("pinned", [])
+        if ticker not in cat["pinned"]:
+            cat["pinned"].append(ticker)
+    _write_json(ROSTER_PATH, roster)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/portfolio/prices")
+def api_portfolio_prices():
+    """Fetch live prices for all holdings and compute unrealised PnL."""
+    from utils.data_fetcher import get_fx_rates, get_ohlcv
+
+    portfolio = _read_json_or_default(PORTFOLIO_PATH, {"holdings": []})
+    fx_rates = get_fx_rates()
+    usd_to_cad = fx_rates.get("USDCAD", 1.38)
+
+    enriched_holdings = []
+    for holding in portfolio.get("holdings", []):
+        yfinance_ticker = (
+            holding["ticker"] + ".TO" if holding.get("exchange") == "TSX" else holding["ticker"]
+        )
+        try:
+            df = get_ohlcv(yfinance_ticker, days=5)
+            current_price = float(df["close"].iloc[-1])
+        except Exception:
+            current_price = None
+
+        price_in_cad = None
+        unrealised_pnl_pct = None
+        if current_price is not None:
+            price_in_cad = (
+                current_price * usd_to_cad if holding.get("currency") == "USD" else current_price
+            )
+            avg_cost = holding.get("avg_cost_cad", 0)
+            if avg_cost and avg_cost > 0:
+                unrealised_pnl_pct = round(((price_in_cad - avg_cost) / avg_cost) * 100, 2)
+
+        enriched_holdings.append({
+            **holding,
+            "current_price": current_price,
+            "current_price_cad": round(price_in_cad, 2) if price_in_cad else None,
+            "pnl_pct": unrealised_pnl_pct,
+        })
+
+    return jsonify({**portfolio, "holdings": enriched_holdings, "usd_cad": usd_to_cad})
+
+
+# WebSocket events ────────────────────────────────────────────────────────────
+
+@socketio.on("trigger_scan")
+def handle_trigger_scan(data):
+    """Run a scan in the background and stream agent state events to the UI.
+
+    The scan_type is whitelisted and we only call in-process orchestrator
+    functions, so this endpoint cannot be used to execute arbitrary code
+    even if the socket is exposed on the LAN.
+    """
+    requested_scan = (data or {}).get("scan_type", "daily")
+    if requested_scan not in ALLOWED_SCAN_TYPES:
+        emit("log", {"agent_id": "system", "message": f"Refused unknown scan type: {requested_scan}"})
+        return
+
+    emit("log", {"agent_id": "system", "message": f"Manual {requested_scan} scan triggered"})
+
+    def execute_scan():
+        try:
+            # The UI today only supports a manual daily run. Other scan_types
+            # are accepted at the socket layer for forward-compatibility but
+            # all currently route to run_daily.
+            from agents.orchestrator import run_daily
+            run_daily(dry_run=False)
+        except Exception as error:
+            events.log("system", f"Scan error: {error}")
+        finally:
+            events.scan_complete()
+
+    socketio.start_background_task(execute_scan)
+
+
+@socketio.on("connect")
+def handle_connect():
+    emit("log", {"agent_id": "system", "message": "UI connected. All agents idle."})
+
+
+if __name__ == "__main__":
+    host = os.environ.get("REFINERY_UI_HOST", "127.0.0.1")
+    port = int(os.environ.get("REFINERY_UI_PORT", "5173"))
+    if host != "127.0.0.1":
+        logger.warning(
+            "UI is binding to %s, which exposes The Refinery on your local network. "
+            "Anyone on the same Wi-Fi can read your portfolio.",
+            host,
+        )
+    socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True)
