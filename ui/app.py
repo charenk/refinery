@@ -74,6 +74,28 @@ def serve_index():
     return app.send_static_file("index.html")
 
 
+@app.route("/api/onboarding/status")
+def api_onboarding_status():
+    """Tells the UI what's missing so it can render appropriate prompts.
+
+    Uses the validated loader so the placeholder holding (shares=0) does not
+    count as "configured". Never throws.
+    """
+    from utils.portfolio_loader import load_portfolio
+
+    validated = load_portfolio(PORTFOLIO_PATH)
+    has_holdings = bool(validated.get("holdings"))
+
+    has_briefs = bool(glob_module.glob(os.path.join(OUTPUTS_DIR, "*_brief.md")))
+    has_env = os.path.exists(os.path.join(REPO_ROOT, ".env"))
+
+    return jsonify({
+        "has_holdings": has_holdings,
+        "has_briefs": has_briefs,
+        "has_env": has_env,
+    })
+
+
 # API endpoints (consumed by the JS tabs) ─────────────────────────────────────
 
 @app.route("/api/portfolio")
@@ -197,6 +219,54 @@ def api_roster_pin():
             cat["pinned"].append(ticker)
     _write_json(ROSTER_PATH, roster)
     return jsonify({"ok": True})
+
+
+@app.route("/api/portfolio/add", methods=["POST"])
+def api_portfolio_add():
+    """Append a new holding to memory/portfolio.json after validation."""
+    from utils.portfolio_loader import _validate_holding
+
+    raw_input = request.json or {}
+    cleaned = _validate_holding(raw_input, index=0)
+    if cleaned is None:
+        return jsonify({
+            "ok": False,
+            "error": "Invalid holding. Check ticker (uppercase letters, numbers, dot, dash), shares (non-negative number), and avg_cost_cad (non-negative number).",
+        }), 400
+
+    portfolio = _read_json_or_default(PORTFOLIO_PATH, {
+        "holdings": [], "cash_available": 0, "currency": "CAD", "account": "Personal",
+    })
+    portfolio.setdefault("holdings", [])
+
+    # Reject duplicates.
+    if any(h.get("ticker", "").upper() == cleaned["ticker"] for h in portfolio["holdings"]):
+        return jsonify({"ok": False, "error": f"{cleaned['ticker']} is already in the portfolio."}), 409
+
+    portfolio["holdings"].append(cleaned)
+    _write_json(PORTFOLIO_PATH, portfolio)
+    return jsonify({"ok": True, "holding": cleaned})
+
+
+@app.route("/api/portfolio/remove", methods=["POST", "DELETE"])
+def api_portfolio_remove():
+    """Remove a holding by ticker. Idempotent: returns ok even if absent."""
+    if request.method == "DELETE":
+        ticker = (request.args.get("ticker") or "").upper().strip()
+    else:
+        ticker = str((request.json or {}).get("ticker", "")).upper().strip()
+
+    if not ticker:
+        return jsonify({"ok": False, "error": "ticker is required"}), 400
+
+    portfolio = _read_json_or_default(PORTFOLIO_PATH, {"holdings": []})
+    before = len(portfolio.get("holdings", []))
+    portfolio["holdings"] = [
+        h for h in portfolio.get("holdings", []) if h.get("ticker", "").upper() != ticker
+    ]
+    removed = before - len(portfolio["holdings"])
+    _write_json(PORTFOLIO_PATH, portfolio)
+    return jsonify({"ok": True, "removed": removed})
 
 
 @app.route("/api/portfolio/prices")
