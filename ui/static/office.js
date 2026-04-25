@@ -1,20 +1,86 @@
-// office.js -- Pixel Art Agent Office (Tab 1)
+// office.js -- Pixel art agent office (Tab 1)
+//
+// Severed-floor inspired layout: a sterile institutional space with a green
+// institutional carpet, white drop-ceiling with fluorescent panels, two
+// cubicle quartets in the centre, and a Memory kiosk on the right.
+//
+// Eight agents are organised into two thematic teams:
+//
+//   Reasoning Quartet (left)        Records Quartet (right)
+//     orch    scan                    port    pm
+//     ta      senti                   learn   roster
+//
+// Each quartet is a 2x2 grid of desks separated by a + cross of dark green
+// acoustic privacy panels, with the team facing outward. The whole room is
+// drawn in a flat side-on style, so every agent faces the viewer.
+//
+// Animation pipeline (back-to-front each frame):
+//   ceiling -> wall -> carpet -> back panels of top row -> top row desks
+//     -> top row sitting agents -> back panels of bottom row -> bottom row
+//     -> walking agents -> runner sprites -> packets -> flashes
+//
+// Socket events consumed (emitted by the Python agents through ui/events.py):
+//   agent_state {agent_id, state}     desk monitor color + speech bubble
+//   packet      {from_id, to_id, color}   8x8 pixel arc between desks
+//   runner      {from_id, to_id, color}   small clipboard sprite walks the floor
+//   agent_walk  {from_id, to_id, collab_ms}   the agent leaves their desk,
+//                                              walks to the collaborator,
+//                                              stands for collab_ms, returns
+//   log         {agent_id, message}    appends a line to the HUD log
+//   scan_complete {}                   resets the "Run morning scan" button
+//
+// Dev helper exposed on window: window.testWalk('orch', 'ta')
+
 (function () {
   'use strict';
 
-  // ── Constants ────────────────────────────────────────────────────────
-  const W = 580, H = 205, SCALE = 3;
-  const WH = 42; // wall height
-  const FLOOR_A = '#F0E4AE', FLOOR_B = '#E4D49A';
-  const WALL = '#D4AA6A', BRICK_A = '#C47B50', BRICK_B = '#B86840';
-  const DESK_TOP = '#B08A5C', DESK_FRONT = '#7A4F2E';
-  const SHELF_COL = '#7A4F2E';
-  const RACK_BG = '#161E2C', RACK_LED = '#00FF41';
-  const RUG_COL = '#C8A060';
-  const HUD_BG = '#111108';
+  // ── Canvas geometry ─────────────────────────────────────────────────────
+  const W = 580;
+  const H = 205;
+  const SCALE = 3;
+  const CEILING_HEIGHT = 22;
+  const WALL_HEIGHT = 44;            // ceiling + wall band
+  const FLOOR_LANE_Y = 196;          // y where walkers/runners stand
+  const FLOOR_LANE_OFFSET = 3;
+  const WALK_TOTAL_MS = 2200;
+  const WALK_SEG_FRAC = [0.22, 0.56, 0.22];
+
+  // ── Severance palette ───────────────────────────────────────────────────
+  const CARPET = '#7a9070';          // institutional green
+  const CARPET_DARK = '#6d8362';     // very subtle floor variation
+  const WALL_WHITE = '#f5f5ee';
+  const WALL_TRIM = '#d8d8cc';
+  const CEILING = '#f8f8f0';
+  const CEILING_GRID = '#dcdcd0';
+  const FLUORESCENT = '#ffffff';
+  const FLUORESCENT_GLOW = '#fffce8';
+  const DESK_TOP = '#f0f0e6';        // off-white desk
+  const DESK_FRONT = '#d8d8ce';
+  const DESK_EDGE = '#9a9a8e';
+  const PANEL_BACK = '#3e5c4a';      // dark muted green privacy panel
+  const PANEL_TOP = '#5e7a68';       // panel highlight edge
+  const PANEL_FRAME = '#252525';
+  const CHAIR_BODY = '#2a2a2e';
+  const CHAIR_DARK = '#1a1a1e';
+  const CHAIR_MAT = '#5a6e54';       // chair mat — slightly darker than carpet
+  const CHAIR_MAT_EDGE = '#4a5e44';
+  const PEDESTAL = '#e8e8de';
+  const PEDESTAL_HANDLE = '#b8b8ae';
+  const CRT_HOUSING = '#e8e8de';
+  const CRT_BEZEL = '#b8b8ae';
+  const CRT_SCREEN_OFF = '#1a3050';
+  const CRT_SCREEN_GLOW = '#3060a0';
+  const KIOSK_BODY = '#f0f0e6';
+  const KIOSK_TRIM = '#9a9a8e';
+  const SUIT = '#1a1a26';
+  const SUIT_SHADOW = '#0e0e16';
+  const SHIRT_WHITE = '#f0f0e8';
+  const SKIN = '#e8c89a';
+  const HAIR = '#3a2a18';
+  const SIGN_INK = '#1a1a26';
 
   const STATE_SCREEN = {
-    idle:    '#162410',
+    idle:    '#1a3050',     // CRT off-blue
     active:  '#4ade80',
     reading: '#60a5fa',
     writing: '#fbbf24',
@@ -29,31 +95,66 @@
     error: '!'
   };
 
+  // ── Agents and pseudo-stations ──────────────────────────────────────────
+  // Two quartets, each a 2x2 grid. x is the desk's left edge, dy is the
+  // desk's top edge. Desk width = 60, height (top+front) = 22.
+  // Quartet 1 spans x=46-180, Quartet 2 spans x=216-350.
   const AGENTS = [
-    {id:'orch',   nm:'Orchestrator', x:8,   dy:62,  c:'#8B7FDD'},
-    {id:'scan',   nm:'Scanner',      x:88,  dy:62,  c:'#2DAE85'},
-    {id:'ta',     nm:'TA Agent',     x:168, dy:62,  c:'#4A8ADD'},
-    {id:'senti',  nm:'Sentiment',    x:248, dy:62,  c:'#D86A40'},
-    {id:'port',   nm:'Portfolio',    x:328, dy:62,  c:'#D4637E'},
-    {id:'pm',     nm:'Post-mortem',  x:8,   dy:143, c:'#9A9790'},
-    {id:'learn',  nm:'Learning',     x:88,  dy:143, c:'#72AA32'},
-    {id:'roster', nm:'Roster',       x:208, dy:143, c:'#CA8527'}
+    // Reasoning quartet (left)
+    {id: 'orch',   nm: 'Orchestrator', x:  46, dy:  72, c: '#8B7FDD'},
+    {id: 'scan',   nm: 'Scanner',      x: 116, dy:  72, c: '#2DAE85'},
+    {id: 'ta',     nm: 'TA Agent',     x:  46, dy: 152, c: '#4A8ADD'},
+    {id: 'senti',  nm: 'Sentiment',    x: 116, dy: 152, c: '#D86A40'},
+    // Records quartet (right)
+    {id: 'port',   nm: 'Portfolio',    x: 216, dy:  72, c: '#D4637E'},
+    {id: 'pm',     nm: 'Post-mortem',  x: 286, dy:  72, c: '#9A9790'},
+    {id: 'learn',  nm: 'Learning',     x: 216, dy: 152, c: '#72AA32'},
+    {id: 'roster', nm: 'Roster',       x: 286, dy: 152, c: '#CA8527'}
   ];
 
-  const MEMORY_DB = {x: 505, y: 115};
+  // Layout constants for the cubicle furniture
+  const DESK_W = 60;
+  const DESK_H_TOP = 7;
+  const DESK_H_FRONT = 14;
+  const PANEL_RISE_TOP = 24;       // how high panels rise above the top-row desks
+  const PANEL_RISE_BOT = 26;       // and the bottom-row desks
+  const CHAIR_OFFSET_Y = 26;       // chair top relative to desk top
 
-  function getDeskCenterX(agent) { return agent.x + 33; }
+  // The Memory DB is a kiosk on the right
+  const MEMORY_DB = {id: 'memory_db', x: 444, y: 110};
+
+  function getAgent(id) {
+    return AGENTS.find(a => a.id === id) || null;
+  }
+
+  function getDeskCenterX(agent) { return agent.x + DESK_W / 2; }
   function getCharacterY(agent) { return agent.dy - 6; }
 
-  // ── State ────────────────────────────────────────────────────────────
-  const agentStates = {};
-  AGENTS.forEach(a => agentStates[a.id] = 'idle');
+  // The "front" of the desk where a walker enters/leaves.
+  function getDeskFront(agent) {
+    return {x: agent.x + DESK_W / 2, y: agent.dy + 30};
+  }
 
+  function getStation(id) {
+    if (id === 'memory_db') return MEMORY_DB;
+    const agent = getAgent(id);
+    if (agent) return {x: getDeskCenterX(agent), y: getCharacterY(agent), agent};
+    return {x: 0, y: 0};
+  }
+
+  // ── Mutable state ───────────────────────────────────────────────────────
+  const agentStates = {};
+  AGENTS.forEach(a => { agentStates[a.id] = 'idle'; });
+
+  const agentPos = {};
   const packets = [];
+  const flashes = [];
+  const runners = [];
   const logs = [];
+
   let scanRunning = false;
 
-  // ── Canvas setup ─────────────────────────────────────────────────────
+  // ── Canvas setup ────────────────────────────────────────────────────────
   const panel = document.getElementById('tab-office');
   if (!panel) return;
 
@@ -97,7 +198,7 @@
     scanBtn.textContent = 'SCANNING...';
     scanBtn.style.opacity = '0.5';
     socket.emit('trigger_scan', {scan_type: 'daily'});
-    setTimeout(function() {
+    setTimeout(function () {
       if (scanRunning) {
         scanRunning = false;
         scanBtn.textContent = 'RUN MORNING SCAN';
@@ -123,272 +224,537 @@
 
   const ctx = canvas.getContext('2d');
 
-  // ── Drawing helpers ──────────────────────────────────────────────────
+  // ── Drawing primitives ──────────────────────────────────────────────────
   function px(x, y, w, h, color) {
     ctx.fillStyle = color;
     ctx.fillRect(Math.round(x), Math.round(y), w, h);
   }
 
+  // ── Room ────────────────────────────────────────────────────────────────
+  function drawCeiling() {
+    px(0, 0, W, CEILING_HEIGHT, CEILING);
+    // Drop-ceiling grid: 30px columns x 11px rows
+    for (let gx = 0; gx <= W; gx += 30) {
+      px(gx, 0, 1, CEILING_HEIGHT, CEILING_GRID);
+    }
+    for (let gy = 0; gy <= CEILING_HEIGHT; gy += 11) {
+      px(0, gy, W, 1, CEILING_GRID);
+    }
+    // Recessed fluorescent panels every other column
+    for (let fx = 30; fx < W; fx += 60) {
+      px(fx + 6, 2, 18, 7, FLUORESCENT);
+      px(fx + 7, 3, 16, 5, FLUORESCENT_GLOW);
+      px(fx + 6, 13, 18, 7, FLUORESCENT);
+      px(fx + 7, 14, 16, 5, FLUORESCENT_GLOW);
+    }
+  }
+
   function drawWall() {
-    px(0, 0, W, WH, WALL);
-    // Brick rows
-    for (let row = 0; row < 3; row++) {
-      const y = 4 + row * 12;
-      const col = row % 2 === 0 ? BRICK_A : BRICK_B;
-      for (let bx = 0; bx < W; bx += 24) {
-        const offset = row % 2 === 0 ? 0 : 12;
-        px(bx + offset, y, 20, 8, col);
+    px(0, CEILING_HEIGHT, W, WALL_HEIGHT - CEILING_HEIGHT, WALL_WHITE);
+    px(0, CEILING_HEIGHT, W, 1, WALL_TRIM);
+    px(0, WALL_HEIGHT - 1, W, 1, WALL_TRIM);
+  }
+
+  function drawRefinerySign() {
+    // A sober Lumon-style sign across the back wall.
+    const sx = 218, sy = 26;
+    px(sx, sy, 142, 14, WALL_WHITE);
+    px(sx, sy, 142, 1, WALL_TRIM);
+    px(sx, sy + 13, 142, 1, WALL_TRIM);
+    ctx.fillStyle = SIGN_INK;
+    ctx.font = '10px monospace';
+    const prevAlign = ctx.textAlign;
+    const prevBaseline = ctx.textBaseline;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('THE REFINERY', sx + 71, sy + 7);
+    ctx.textAlign = prevAlign;
+    ctx.textBaseline = prevBaseline;
+  }
+
+  function drawCarpet() {
+    px(0, WALL_HEIGHT, W, H - WALL_HEIGHT, CARPET);
+    // Subtle floor variation: fine 2px noise stripes every ~12px
+    for (let cy = WALL_HEIGHT + 8; cy < H; cy += 12) {
+      for (let cx = 4; cx < W; cx += 18) {
+        px(cx, cy, 4, 1, CARPET_DARK);
       }
     }
-    // Top trim
-    px(0, 0, W, 2, '#9B7040');
   }
 
-  function drawFloor() {
-    const tileSize = 14;
-    for (let ty = WH; ty < H; ty += tileSize) {
-      for (let tx = 0; tx < W; tx += tileSize) {
-        const odd = ((tx / tileSize | 0) + (ty / tileSize | 0)) % 2;
-        px(tx, ty, tileSize, tileSize, odd ? FLOOR_B : FLOOR_A);
-      }
-    }
+  // ── Cubicle furniture ───────────────────────────────────────────────────
+  function drawPrivacyPanelVertical(px_, py, height) {
+    px(px_, py, 4, height, PANEL_BACK);
+    px(px_, py, 4, 2, PANEL_TOP);
+    px(px_, py + height - 1, 4, 1, PANEL_FRAME);
   }
 
-  function drawShelf(sx, sy) {
-    // Bookshelf frame
-    px(sx, sy, 50, 36, SHELF_COL);
-    px(sx + 2, sy + 2, 46, 10, '#1a1208');
-    px(sx + 2, sy + 14, 46, 10, '#1a1208');
-    px(sx + 2, sy + 26, 46, 8, '#1a1208');
-    // Books
-    const bookColors = ['#D44', '#4A8ADD', '#72AA32', '#D86A40', '#8B7FDD', '#CA8527', '#D4637E'];
-    for (let i = 0; i < 6; i++) {
-      px(sx + 4 + i * 7, sy + 3, 5, 8, bookColors[i % bookColors.length]);
-    }
-    for (let i = 0; i < 6; i++) {
-      px(sx + 4 + i * 7, sy + 15, 5, 8, bookColors[(i + 3) % bookColors.length]);
-    }
-    for (let i = 0; i < 5; i++) {
-      px(sx + 4 + i * 8, sy + 27, 6, 6, bookColors[(i + 1) % bookColors.length]);
-    }
+  function drawPrivacyPanelHorizontal(px_, py, width) {
+    px(px_, py, width, 4, PANEL_BACK);
+    px(px_, py, width, 2, PANEL_TOP);
+    px(px_ + width - 1, py + 1, 1, 3, PANEL_FRAME);
   }
 
-  function drawLamp(lx, ly) {
-    px(lx, ly, 2, 24, '#9B7040');       // pole
-    px(lx - 3, ly - 2, 8, 4, '#CA8527'); // shade
-    px(lx - 1, ly + 24, 6, 2, '#7A4F2E'); // base
-    px(lx, ly, 2, 2, '#FFE4A0');        // glow
+  function drawQuartetPanels(quartetLeft, topRowDy, botRowDy) {
+    // The + cross of panels in the centre of a quartet:
+    //   - one vertical panel down the middle
+    //   - one horizontal panel between top and bottom rows
+    const q = quartetLeft;
+    const quartetWidth = 2 * DESK_W + 14;   // 60 + gap + 60 + outer margin
+    const middleX = q + DESK_W + 5;          // between left and right desks
+    // Vertical panel for the top row (sits behind the top-row desks)
+    drawPrivacyPanelVertical(middleX, topRowDy - PANEL_RISE_TOP, PANEL_RISE_TOP + DESK_H_TOP);
+    // Vertical panel for the bottom row
+    drawPrivacyPanelVertical(middleX, botRowDy - PANEL_RISE_BOT, PANEL_RISE_BOT + DESK_H_TOP);
+    // Horizontal panel separating top row from bottom row
+    const panelY = topRowDy + DESK_H_TOP + DESK_H_FRONT + CHAIR_OFFSET_Y - 4;
+    drawPrivacyPanelHorizontal(q - 4, panelY, quartetWidth);
   }
 
-  function drawPoster(px_, py) {
-    px(px_, py, 28, 20, '#1a1208');
-    px(px_ + 1, py + 1, 26, 18, '#0e0e0a');
-    // Mini chart lines
-    ctx.strokeStyle = '#4ade80';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(px_ + 3, py + 14);
-    ctx.lineTo(px_ + 8, py + 8);
-    ctx.lineTo(px_ + 14, py + 12);
-    ctx.lineTo(px_ + 20, py + 5);
-    ctx.lineTo(px_ + 25, py + 9);
-    ctx.stroke();
+  function drawChairMat(agent) {
+    const mx = agent.x + 14, my = agent.dy + CHAIR_OFFSET_Y - 2;
+    px(mx, my, 32, 18, CHAIR_MAT);
+    px(mx, my, 32, 1, CHAIR_MAT_EDGE);
+    px(mx, my + 17, 32, 1, CHAIR_MAT_EDGE);
+    px(mx, my, 1, 18, CHAIR_MAT_EDGE);
+    px(mx + 31, my, 1, 18, CHAIR_MAT_EDGE);
   }
 
-  function drawPlant(plx, ply) {
-    px(plx, ply + 8, 8, 10, '#7A4F2E');  // pot
-    px(plx + 1, ply + 6, 6, 3, '#7A4F2E'); // rim
-    px(plx + 2, ply, 4, 8, '#3a6a20');   // stem
-    px(plx - 1, ply - 2, 4, 4, '#4a8a30'); // leaf L
-    px(plx + 5, ply - 2, 4, 4, '#4a8a30'); // leaf R
-    px(plx + 1, ply - 4, 6, 4, '#5aa040'); // leaf top
+  function drawFilePedestal(agent) {
+    // White file pedestal under the right side of each desk.
+    const px_ = agent.x + DESK_W - 14;
+    const py = agent.dy + DESK_H_TOP;
+    px(px_, py, 12, DESK_H_FRONT, PEDESTAL);
+    px(px_, py + 4, 12, 1, PEDESTAL_HANDLE);
+    px(px_, py + 9, 12, 1, PEDESTAL_HANDLE);
+    px(px_ + 5, py + 5, 2, 1, '#7a7a70');
+    px(px_ + 5, py + 10, 2, 1, '#7a7a70');
   }
 
-  function drawServerRack(rx, ry, rw, rh) {
-    px(rx, ry, rw, rh, RACK_BG);
-    px(rx + 1, ry + 1, rw - 2, rh - 2, '#0e1420');
-    // Server units
-    for (let i = 0; i < 5; i++) {
-      const uy = ry + 4 + i * 16;
-      px(rx + 3, uy, rw - 6, 12, '#1a2438');
-      // LEDs
-      px(rx + 5, uy + 3, 2, 2, RACK_LED);
-      px(rx + 9, uy + 3, 2, 2, i % 2 === 0 ? RACK_LED : '#FF4444');
-      // Ventilation lines
-      for (let v = 0; v < 4; v++) {
-        px(rx + 16 + v * 6, uy + 4, 4, 1, '#2a3a50');
-      }
-    }
-    // "MEM DB" label
-    ctx.fillStyle = '#6a8a60';
-    ctx.font = '7px monospace';
-    ctx.fillText('MEM', rx + 6, ry + rh - 4);
-  }
-
-  function drawCabinet(cx_, cy) {
-    px(cx_, cy, 40, 30, '#2a2018');
-    px(cx_ + 2, cy + 2, 36, 12, '#3a3020');
-    px(cx_ + 2, cy + 16, 36, 12, '#3a3020');
-    px(cx_ + 18, cy + 6, 4, 2, '#9B7040'); // handle
-    px(cx_ + 18, cy + 20, 4, 2, '#9B7040'); // handle
-  }
-
-  function drawRug(rx, ry, rw, rh) {
-    px(rx, ry, rw, rh, RUG_COL);
-    px(rx + 2, ry + 2, rw - 4, rh - 4, '#B89050');
-    // Border pattern
-    for (let i = 0; i < rw - 8; i += 6) {
-      px(rx + 4 + i, ry + 3, 4, 1, '#9A7040');
-      px(rx + 4 + i, ry + rh - 5, 4, 1, '#9A7040');
-    }
-  }
-
-  function drawCouch(cx_, cy) {
-    px(cx_, cy, 50, 22, '#6a4a2a');      // body
-    px(cx_ + 2, cy + 2, 46, 14, '#8a6a40'); // cushion
-    px(cx_, cy, 6, 18, '#5a3a1a');       // arm L
-    px(cx_ + 44, cy, 6, 18, '#5a3a1a');  // arm R
-    px(cx_ + 2, cy - 4, 46, 6, '#5a3a1a'); // back
-    // Cushion lines
-    px(cx_ + 16, cy + 3, 1, 12, '#7a5a30');
-    px(cx_ + 32, cy + 3, 1, 12, '#7a5a30');
-  }
-
-  function drawCoffee(cx_, cy) {
-    px(cx_, cy, 12, 18, '#3a3030');       // machine body
-    px(cx_ + 2, cy + 2, 8, 6, '#222');   // screen
-    px(cx_ + 4, cy + 10, 4, 6, '#8a6040'); // cup
-    px(cx_ + 3, cy + 9, 6, 1, '#9a7050'); // saucer
-  }
-
-  function drawDesk(a) {
-    const dx = a.x, dy = a.dy;
-    // Desk surface
-    px(dx, dy, 66, 8, DESK_TOP);
-    // Desk front
-    px(dx, dy + 8, 66, 14, DESK_FRONT);
+  function drawDesk(agent) {
+    const dx = agent.x, dy = agent.dy;
+    // White desk surface
+    px(dx, dy, DESK_W, DESK_H_TOP, DESK_TOP);
+    // Desk front skirt
+    px(dx, dy + DESK_H_TOP, DESK_W, DESK_H_FRONT, DESK_FRONT);
+    // Desk top edge highlight
+    px(dx, dy, DESK_W, 1, '#ffffff');
+    // Desk bottom edge shadow
+    px(dx, dy + DESK_H_TOP + DESK_H_FRONT - 1, DESK_W, 1, DESK_EDGE);
     // Desk legs
-    px(dx + 2, dy + 22, 4, 6, DESK_FRONT);
-    px(dx + 60, dy + 22, 4, 6, DESK_FRONT);
-    // Monitor
-    px(dx + 22, dy - 16, 22, 14, '#1a1a1a');
-    const screenColor = STATE_SCREEN[agentStates[a.id]] || STATE_SCREEN.idle;
-    px(dx + 24, dy - 14, 18, 10, screenColor);
-    // Monitor stand
-    px(dx + 30, dy - 2, 6, 3, '#333');
-    // Keyboard
-    px(dx + 18, dy + 2, 16, 3, '#2a2a2a');
-    // Name label
-    ctx.fillStyle = '#1a1208';
-    ctx.fillRect(dx + 2, dy + 10, 62, 10);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '8px monospace';
-    ctx.fillText(a.nm, dx + 4, dy + 18);
-  }
+    px(dx + 3, dy + DESK_H_TOP + DESK_H_FRONT, 3, 6, DESK_EDGE);
+    px(dx + DESK_W - 6, dy + DESK_H_TOP + DESK_H_FRONT, 3, 6, DESK_EDGE);
 
-  function drawChair(a) {
-    const cx_ = a.x + 28, cy = a.dy + 26;
-    px(cx_, cy, 14, 4, '#3a3a3a');        // seat
-    px(cx_ + 5, cy + 4, 4, 6, '#333');   // stem
-    px(cx_ + 2, cy + 10, 10, 2, '#2a2a2a'); // base
-  }
-
-  function drawChar(a) {
-    const cx_ = a.x + 30, cy = a.dy - 22;
-    const state = agentStates[a.id];
-    // Head
-    px(cx_, cy, 8, 8, '#E8C89A');
-    // Hair
-    px(cx_, cy, 8, 3, '#5a4020');
-    // Shirt (agent color)
-    px(cx_, cy + 9, 8, 6, a.c);
-    // Eyes
-    if (state === 'done') {
-      // Smile
-      px(cx_ + 2, cy + 4, 1, 1, '#333');
-      px(cx_ + 5, cy + 4, 1, 1, '#333');
-      px(cx_ + 2, cy + 6, 4, 1, '#333');
+    // CRT monitor: chunky white housing, dark blue screen
+    const monX = dx + 22, monY = dy - 16;
+    // Housing
+    px(monX, monY, 22, 14, CRT_HOUSING);
+    px(monX, monY, 22, 1, '#ffffff');
+    px(monX, monY + 13, 22, 1, CRT_BEZEL);
+    px(monX, monY, 1, 14, '#ffffff');
+    px(monX + 21, monY, 1, 14, CRT_BEZEL);
+    // Screen with state-driven colour and a flash override
+    const flash = flashes.find(f => f.agentId === agent.id);
+    let screenColor;
+    if (flash && Date.now() - flash.start < 150) {
+      screenColor = '#ffffff';
     } else {
-      px(cx_ + 2, cy + 4, 1, 1, '#333');
-      px(cx_ + 5, cy + 4, 1, 1, '#333');
+      screenColor = STATE_SCREEN[agentStates[agent.id]] || STATE_SCREEN.idle;
     }
+    px(monX + 3, monY + 3, 16, 8, screenColor);
+    // Subtle scanline highlight
+    if (agentStates[agent.id] !== 'idle') {
+      px(monX + 3, monY + 5, 16, 1, 'rgba(255,255,255,0.15)');
+    }
+    // Monitor stand
+    px(dx + 30, dy - 2, 6, 2, CRT_BEZEL);
+    px(dx + 28, dy, 10, 1, CRT_BEZEL);
+    // Keyboard
+    px(dx + 6, dy + 1, 14, 3, '#7a7a70');
+    px(dx + 6, dy + 1, 14, 1, '#9a9a90');
 
-    // Speech bubble
-    const bubble = STATE_BUBBLE[state];
+    // Tighter, centered desk label on the front skirt
+    px(dx + 2, dy + DESK_H_TOP + 3, DESK_W - 4, 8, '#1a1a1e');
+    ctx.fillStyle = '#e0e0d8';
+    ctx.font = '7px monospace';
+    const prevAlign = ctx.textAlign;
+    const prevBaseline = ctx.textBaseline;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(agent.nm, dx + DESK_W / 2, dy + DESK_H_TOP + 7);
+    ctx.textAlign = prevAlign;
+    ctx.textBaseline = prevBaseline;
+  }
+
+  function drawChair(agent) {
+    const isEmpty = agentPos[agent.id] && agentPos[agent.id].state !== 'sitting';
+    const offsetX = isEmpty ? 4 : 0;
+    const offsetY = isEmpty ? 2 : 0;
+    const cx_ = agent.x + 22 + offsetX;
+    const cy = agent.dy + CHAIR_OFFSET_Y + offsetY;
+    // Seat back
+    px(cx_ + 3, cy - 6, 14, 6, CHAIR_BODY);
+    px(cx_ + 3, cy - 6, 14, 1, CHAIR_DARK);
+    // Seat
+    px(cx_, cy, 20, 4, CHAIR_BODY);
+    px(cx_, cy, 20, 1, '#3a3a3e');
+    // Stem
+    px(cx_ + 8, cy + 4, 4, 5, CHAIR_DARK);
+    // Wheelbase (5-prong simplified)
+    px(cx_ - 1, cy + 9, 22, 2, CHAIR_DARK);
+    px(cx_ + 2, cy + 11, 2, 1, CHAIR_DARK);
+    px(cx_ + 8, cy + 11, 4, 1, CHAIR_DARK);
+    px(cx_ + 16, cy + 11, 2, 1, CHAIR_DARK);
+  }
+
+  // ── Memory DB kiosk ─────────────────────────────────────────────────────
+  function drawMemoryKiosk() {
+    // White floor-to-ceiling pillar with a CRT in the middle.
+    const kx = 430, ky = WALL_HEIGHT, kw = 60, kh = H - WALL_HEIGHT - 14;
+    // Body
+    px(kx, ky, kw, kh, KIOSK_BODY);
+    px(kx, ky, kw, 2, '#ffffff');
+    px(kx, ky + kh - 2, kw, 2, KIOSK_TRIM);
+    px(kx, ky, 1, kh, '#ffffff');
+    px(kx + kw - 1, ky, 1, kh, KIOSK_TRIM);
+
+    // Subtle horizontal panel seams
+    px(kx, ky + 22, kw, 1, KIOSK_TRIM);
+    px(kx, ky + 100, kw, 1, KIOSK_TRIM);
+
+    // CRT screen midway down
+    const monX = kx + 12, monY = ky + 38;
+    px(monX, monY, 36, 28, CRT_HOUSING);
+    px(monX, monY, 36, 1, '#ffffff');
+    px(monX, monY + 27, 36, 1, CRT_BEZEL);
+    px(monX + 3, monY + 3, 30, 22, CRT_SCREEN_OFF);
+    // Scrolling pixel scanlines (animated by frame time)
+    const offset = Math.floor(Date.now() / 80) % 4;
+    for (let line = 0; line < 22; line += 4) {
+      const yy = monY + 3 + ((line + offset) % 22);
+      px(monX + 3, yy, 30, 1, CRT_SCREEN_GLOW);
+    }
+    // "RECORDS" plate
+    ctx.fillStyle = '#1a1a26';
+    ctx.font = '7px monospace';
+    const prevAlign = ctx.textAlign;
+    const prevBaseline = ctx.textBaseline;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('RECORDS', kx + kw / 2, monY + 36);
+    ctx.textAlign = prevAlign;
+    ctx.textBaseline = prevBaseline;
+
+    // Floor base shadow
+    px(kx - 3, ky + kh, kw + 6, 2, '#5a6e54');
+  }
+
+  // ── Sprites ─────────────────────────────────────────────────────────────
+  // Severance-style: dark suit, white shirt collar peek, colored tie strip.
+  // Sprite is 8w x 16h centered on (x, y) where (x, y) is the head's top-left.
+  function drawSuitChar(x, y, agentColor, faceState, includeFace) {
+    // Head
+    px(x, y, 8, 8, SKIN);
+    // Hair
+    px(x, y, 8, 3, HAIR);
+    // Suit body
+    px(x, y + 9, 8, 6, SUIT);
+    px(x, y + 9, 8, 1, SUIT_SHADOW);
+    // White shirt collar (V-shape)
+    px(x + 3, y + 9, 2, 2, SHIRT_WHITE);
+    // Tie (colored strip)
+    px(x + 3, y + 11, 2, 4, agentColor);
+    px(x + 3, y + 11, 1, 4, agentColor);
+    // Suit lapels (tiny dark V on top of collar)
+    px(x + 2, y + 9, 1, 3, SUIT_SHADOW);
+    px(x + 5, y + 9, 1, 3, SUIT_SHADOW);
+
+    // Face
+    if (includeFace !== false) {
+      if (faceState === 'done') {
+        px(x + 2, y + 4, 1, 1, '#222');
+        px(x + 5, y + 4, 1, 1, '#222');
+        px(x + 2, y + 6, 4, 1, '#222');
+      } else {
+        px(x + 2, y + 4, 1, 1, '#222');
+        px(x + 5, y + 4, 1, 1, '#222');
+      }
+    }
+  }
+
+  function drawSittingChar(agent) {
+    const cx_ = agent.x + 26, cy = agent.dy - 22;
+    const state = agentStates[agent.id];
+    drawSuitChar(cx_, cy, agent.c, state, true);
+
+    // Speech bubble (typewriter dots when active)
+    let bubble = STATE_BUBBLE[state];
+    if (state === 'active') {
+      const dotCount = (Math.floor(Date.now() / 300) % 3) + 1;
+      bubble = '.'.repeat(dotCount);
+    }
     if (bubble) {
       const bw = bubble.length * 5 + 4;
       px(cx_ - 2, cy - 12, bw, 9, '#fff');
-      px(cx_ + 1, cy - 3, 2, 2, '#fff'); // tail
-      ctx.fillStyle = '#111';
+      px(cx_ - 2, cy - 12, bw, 1, '#d8d8cc');
+      px(cx_ + 1, cy - 3, 2, 2, '#fff');
+      ctx.fillStyle = '#1a1a26';
       ctx.font = '7px monospace';
       ctx.fillText(bubble, cx_, cy - 5);
     }
+
+    // "+1" pop on flash arrival
+    const flash = flashes.find(f => f.agentId === agent.id);
+    if (flash && Date.now() - flash.start < 500) {
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '8px monospace';
+      ctx.fillText('+1', cx_ + 10, cy - 6);
+    }
   }
 
+  function drawWalkingChar(agent, x, y, frame, facingLeft) {
+    drawSuitChar(x, y, agent.c, agentStates[agent.id], true);
+    // Override eyes to look in the walking direction.
+    if (facingLeft) {
+      px(x + 1, y + 4, 1, 1, '#222');
+      px(x + 4, y + 4, 1, 1, '#222');
+    } else {
+      px(x + 3, y + 4, 1, 1, '#222');
+      px(x + 6, y + 4, 1, 1, '#222');
+    }
+    // Walking legs (two-frame cycle)
+    if (frame === 0) {
+      px(x + 1, y + 15, 2, 3, SUIT_SHADOW);
+      px(x + 5, y + 15, 2, 2, SUIT_SHADOW);
+    } else {
+      px(x + 1, y + 15, 2, 2, SUIT_SHADOW);
+      px(x + 5, y + 15, 2, 3, SUIT_SHADOW);
+    }
+  }
+
+  function drawRunner(x, y, frame, color) {
+    // Smaller messenger sprite: 6px head, 5px body, manila folder.
+    px(x, y, 6, 6, SKIN);
+    px(x, y, 6, 2, HAIR);
+    px(x, y + 7, 6, 5, SUIT);
+    px(x, y + 7, 6, 1, SUIT_SHADOW);
+    // White collar peek
+    px(x + 2, y + 7, 2, 1, SHIRT_WHITE);
+    // Tie tip
+    px(x + 2, y + 8, 2, 3, color);
+    // Manila folder
+    px(x + 6, y + 8, 4, 4, '#d8c890');
+    px(x + 6, y + 8, 4, 1, '#a89860');
+    // Eye
+    px(x + 1, y + 3, 1, 1, '#222');
+    px(x + 4, y + 3, 1, 1, '#222');
+    // Walking legs
+    if (frame === 0) {
+      px(x + 1, y + 12, 1, 2, SUIT_SHADOW);
+      px(x + 4, y + 12, 1, 1, SUIT_SHADOW);
+    } else {
+      px(x + 1, y + 12, 1, 1, SUIT_SHADOW);
+      px(x + 4, y + 12, 1, 2, SUIT_SHADOW);
+    }
+  }
+
+  // ── Animation: packets, runners, walkers ────────────────────────────────
   function drawPackets() {
     const now = Date.now();
     for (let i = packets.length - 1; i >= 0; i--) {
-      const p = packets[i];
-      const elapsed = now - p.start;
+      const packet = packets[i];
+      const elapsed = now - packet.start;
       const dur = 800;
       if (elapsed > dur) {
+        if (packet.toId) flashes.push({agentId: packet.toId, start: now});
         packets.splice(i, 1);
         continue;
       }
       const t = elapsed / dur;
-      const x = p.x1 + (p.x2 - p.x1) * t;
-      const y = p.y1 + (p.y2 - p.y1) * t + Math.sin(t * Math.PI) * -18;
-      px(x - 4, y - 4, 8, 8, p.color);
-      px(x - 2, y - 2, 4, 4, '#ffffff88'); // white highlight
+      const x = packet.x1 + (packet.x2 - packet.x1) * t;
+      const y = packet.y1 + (packet.y2 - packet.y1) * t + Math.sin(t * Math.PI) * -18;
+      px(x - 4, y - 4, 8, 8, packet.color);
+      px(x - 2, y - 2, 4, 4, '#ffffff88');
+    }
+    for (let i = flashes.length - 1; i >= 0; i--) {
+      if (now - flashes[i].start > 500) flashes.splice(i, 1);
     }
   }
 
-  // ── Main draw ────────────────────────────────────────────────────────
+  function drawRunners() {
+    const now = Date.now();
+    for (let i = runners.length - 1; i >= 0; i--) {
+      const runner = runners[i];
+      const elapsed = now - runner.start;
+      if (elapsed > runner.dur) {
+        runners.splice(i, 1);
+        continue;
+      }
+      const point = computeWalkPoint(runner, elapsed);
+      const frame = Math.floor(now / 150) % 2;
+      drawRunner(point.x - 3, point.y - 6, frame, runner.color);
+    }
+  }
+
+  function drawWalkers() {
+    const now = Date.now();
+    Object.keys(agentPos).forEach(id => {
+      const pos = agentPos[id];
+      if (pos.state === 'sitting') return;
+      const agent = getAgent(id);
+      if (!agent) return;
+
+      if (pos.state === 'walking') {
+        const elapsed = now - pos.start;
+        if (elapsed >= pos.dur) {
+          if (pos.phase === 'out') {
+            const target = getStation(pos.targetId);
+            pos.state = 'standing';
+            pos.x = target.x;
+            pos.y = target.y + 6;
+            pos.standingStart = now;
+          } else {
+            pos.state = 'sitting';
+            return;
+          }
+        } else {
+          const point = computeWalkPoint(pos, elapsed);
+          pos.x = point.x;
+          pos.y = point.y;
+          const frame = Math.floor(now / 180) % 2;
+          drawWalkingChar(agent, pos.x - 4, pos.y - 8, frame, pos.dir < 0);
+          return;
+        }
+      }
+
+      if (pos.state === 'standing') {
+        const target = getStation(pos.targetId);
+        const standX = target.x + 14;
+        const standY = target.y + 6;
+        drawWalkingChar(agent, standX - 4, standY - 8, 0, true);
+        // Thought bubble
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(standX - 6, standY - 22, 16, 9);
+        ctx.fillRect(standX - 4, standY - 13, 2, 2);
+        ctx.fillStyle = '#1a1a26';
+        ctx.font = '7px monospace';
+        ctx.fillText('hi', standX - 4, standY - 15);
+
+        if (now - pos.standingStart >= pos.collabMs) {
+          const home = getDeskFront(agent);
+          pos.phase = 'in';
+          pos.state = 'walking';
+          pos.start = now;
+          pos.dur = WALK_TOTAL_MS;
+          pos.legs = buildPath({x: standX, y: standY}, home, pos.lane);
+          pos.legDurations = WALK_SEG_FRAC.map(f => f * WALK_TOTAL_MS);
+          pos.dir = (home.x - standX) >= 0 ? 1 : -1;
+        }
+        return;
+      }
+    });
+  }
+
+  function buildPath(start, end, lane) {
+    return [
+      {x1: start.x, y1: start.y, x2: start.x, y2: lane},
+      {x1: start.x, y1: lane,    x2: end.x,   y2: lane},
+      {x1: end.x,   y1: lane,    x2: end.x,   y2: end.y}
+    ];
+  }
+
+  function computeWalkPoint(entity, elapsed) {
+    const legs = entity.legs;
+    const durations = entity.legDurations;
+    let acc = 0;
+    for (let i = 0; i < legs.length; i++) {
+      if (elapsed <= acc + durations[i]) {
+        const localT = (elapsed - acc) / durations[i];
+        const leg = legs[i];
+        return {
+          x: leg.x1 + (leg.x2 - leg.x1) * localT,
+          y: leg.y1 + (leg.y2 - leg.y1) * localT
+        };
+      }
+      acc += durations[i];
+    }
+    const last = legs[legs.length - 1];
+    return {x: last.x2, y: last.y2};
+  }
+
+  // ── Main draw ───────────────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, W, H);
+
+    // Room shell
+    drawCeiling();
     drawWall();
-    drawFloor();
-    drawShelf(8, 3);
-    drawLamp(68, 20);
-    drawPoster(140, 5);
-    drawPoster(270, 5);
-    // "Investment Analyst" sign
-    px(183, 18, 80, 3, '#B08040');
-    ctx.fillStyle = '#FFE4A0';
-    ctx.font = '8px monospace';
-    ctx.fillText('Investment Analyst', 185, 17);
-    drawPlant(400, 28);
-    drawLamp(420, 20);
-    // Server room divider
-    px(438, WH, 2, H - WH, '#9B7040');
-    drawServerRack(443, 64, 46, 88);
-    drawServerRack(493, 64, 44, 88);
-    drawCabinet(443, 158);
-    drawPlant(495, 150);
-    drawRug(296, 148, 130, 46);
-    drawCouch(304, 156);
-    drawCoffee(362, 160);
-    // Agents
-    AGENTS.forEach(a => {
+    drawRefinerySign();
+    drawCarpet();
+
+    // Memory kiosk lives on the right wall, drawn behind both quartets
+    drawMemoryKiosk();
+
+    // Quartet 1 (left): privacy panels behind the desks
+    drawQuartetPanels(46, 72, 152);
+    // Quartet 2 (right)
+    drawQuartetPanels(216, 72, 152);
+
+    // Top-row chair mats and chairs (drawn before desks so the chair backs
+    // sit behind the desk skirt, then character heads pop above).
+    AGENTS.filter(a => a.dy === 72).forEach(a => {
+      drawChairMat(a);
       drawChair(a);
-      drawDesk(a);
-      drawChar(a);
     });
+    AGENTS.filter(a => a.dy === 72).forEach(a => {
+      drawDesk(a);
+      drawFilePedestal(a);
+    });
+    AGENTS.filter(a => a.dy === 72).forEach(a => {
+      const sitting = !agentPos[a.id] || agentPos[a.id].state === 'sitting';
+      if (sitting) drawSittingChar(a);
+    });
+
+    // Bottom row
+    AGENTS.filter(a => a.dy === 152).forEach(a => {
+      drawChairMat(a);
+      drawChair(a);
+    });
+    AGENTS.filter(a => a.dy === 152).forEach(a => {
+      drawDesk(a);
+      drawFilePedestal(a);
+    });
+    AGENTS.filter(a => a.dy === 152).forEach(a => {
+      const sitting = !agentPos[a.id] || agentPos[a.id].state === 'sitting';
+      if (sitting) drawSittingChar(a);
+    });
+
+    // Walking agents (above all furniture)
+    drawWalkers();
+
+    // Top-layer animations
+    drawRunners();
     drawPackets();
+
     requestAnimationFrame(draw);
   }
 
-  // ── HUD updates ──────────────────────────────────────────────────────
+  // ── HUD updates ─────────────────────────────────────────────────────────
   function addLog(agentId, message) {
     const line = document.createElement('div');
     line.style.cssText = 'font-size:13px;padding:1px 0;';
-    const agentColor = (AGENTS.find(a => a.id === agentId) || {}).c || '#8a8a60';
-    line.innerHTML = '<span style="color:' + agentColor + '">[' + agentId + ']</span> ' + message;
+    const agentColor = (getAgent(agentId) || {c: '#8a8a60'}).c;
+    line.innerHTML = '<span style="color:' + agentColor + '">[' + agentId + ']</span> ' + escapeHtml(message);
     logList.appendChild(line);
     logBox.scrollTop = logBox.scrollHeight;
-    // Keep max 50 lines
     while (logList.children.length > 50) logList.removeChild(logList.firstChild);
     logs.push({agent: agentId, msg: message});
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
   }
 
   function updateStatusHud() {
@@ -399,13 +765,66 @@
     }).join('');
   }
 
-  function addPacket(x1, y1, x2, y2, color) {
-    packets.push({x1, y1, x2, y2, color, start: Date.now()});
+  // ── Animation triggers ──────────────────────────────────────────────────
+  function addPacket(x1, y1, x2, y2, color, toId) {
+    packets.push({x1, y1, x2, y2, color, toId, start: Date.now()});
   }
 
-  function getStation(id) {
-    if (id === 'memory_db') return MEMORY_DB;
-    return AGENTS.find(a => a.id === id) || AGENTS[0];
+  function addRunner(fromId, toId, color) {
+    const from = getStation(fromId);
+    const to = getStation(toId);
+    const fromPoint = from.agent ? getDeskFront(from.agent) : {x: from.x, y: from.y};
+    const toPoint = to.agent ? getDeskFront(to.agent) : {x: to.x, y: to.y};
+    const lane = pickFreeLane(fromPoint.x, toPoint.x, runners.map(r => ({x1: r.legs[1].x1, x2: r.legs[1].x2, lane: r.lane})));
+    const legs = buildPath(fromPoint, toPoint, lane);
+    runners.push({
+      fromId, toId, color: color || '#c8a050',
+      start: Date.now(), dur: WALK_TOTAL_MS, lane,
+      legs, legDurations: WALK_SEG_FRAC.map(f => f * WALK_TOTAL_MS)
+    });
+  }
+
+  function pickFreeLane(x1, x2, others) {
+    const myMin = Math.min(x1, x2), myMax = Math.max(x1, x2);
+    let lane = FLOOR_LANE_Y;
+    let attempts = 0;
+    while (attempts < 4) {
+      const collision = others.some(other => {
+        if (other.lane !== lane) return false;
+        const otherMin = Math.min(other.x1, other.x2);
+        const otherMax = Math.max(other.x1, other.x2);
+        return !(myMax < otherMin || myMin > otherMax);
+      });
+      if (!collision) return lane;
+      lane -= FLOOR_LANE_OFFSET;
+      attempts++;
+    }
+    return lane;
+  }
+
+  function startWalk(fromId, toId, collabMs) {
+    const agent = getAgent(fromId);
+    if (!agent) return;
+    if (agentPos[fromId] && agentPos[fromId].state !== 'sitting') return;
+    const home = getDeskFront(agent);
+    const target = getStation(toId);
+    const targetPoint = target.agent ? getDeskFront(target.agent) : {x: target.x, y: target.y};
+    const lane = pickFreeLane(home.x, targetPoint.x, []);
+    const legs = buildPath(home, targetPoint, lane);
+    agentPos[fromId] = {
+      state: 'walking',
+      phase: 'out',
+      targetId: toId,
+      start: Date.now(),
+      dur: WALK_TOTAL_MS,
+      lane,
+      collabMs: collabMs || 1500,
+      legs,
+      legDurations: WALK_SEG_FRAC.map(f => f * WALK_TOTAL_MS),
+      dir: (targetPoint.x - home.x) >= 0 ? 1 : -1,
+      x: home.x,
+      y: home.y
+    };
   }
 
   function setAgentState(id, state) {
@@ -413,7 +832,7 @@
     updateStatusHud();
   }
 
-  // ── Socket.IO ────────────────────────────────────────────────────────
+  // ── Socket.IO ───────────────────────────────────────────────────────────
   const socket = io();
 
   socket.on('agent_state', function (data) {
@@ -423,11 +842,15 @@
   socket.on('packet', function (data) {
     const from = getStation(data.from_id);
     const to = getStation(data.to_id);
-    const fx = from.x !== undefined ? getDeskCenterX(from) : from.x;
-    const fy = from.dy !== undefined ? getCharacterY(from) : from.y;
-    const tx = to.x !== undefined ? getDeskCenterX(to) : to.x;
-    const ty = to.dy !== undefined ? getCharacterY(to) : to.y;
-    addPacket(fx, fy, tx, ty, data.color);
+    addPacket(from.x, from.y, to.x, to.y, data.color, data.to_id);
+  });
+
+  socket.on('runner', function (data) {
+    addRunner(data.from_id, data.to_id, data.color);
+  });
+
+  socket.on('agent_walk', function (data) {
+    startWalk(data.from_id, data.to_id, data.collab_ms);
   });
 
   socket.on('log', function (data) {
@@ -441,7 +864,23 @@
     clockEl.textContent = 'done';
   });
 
-  // ── Init ─────────────────────────────────────────────────────────────
+  // ── Dev helpers (browser console) ───────────────────────────────────────
+  window.testWalk = function (fromId, toId, collabMs) {
+    startWalk(fromId, toId || 'ta', collabMs || 1500);
+  };
+  window.testRunner = function (fromId, toId) {
+    addRunner(fromId || 'orch', toId || 'memory_db');
+  };
+  window.testFlash = function (toId) {
+    flashes.push({agentId: toId || 'ta', start: Date.now()});
+  };
+  window.testPacket = function (fromId, toId) {
+    const from = getStation(fromId || 'orch');
+    const to = getStation(toId || 'ta');
+    addPacket(from.x, from.y, to.x, to.y, (getAgent(fromId || 'orch') || {c: '#fff'}).c, toId || 'ta');
+  };
+
+  // ── Init ────────────────────────────────────────────────────────────────
   updateStatusHud();
   draw();
 })();

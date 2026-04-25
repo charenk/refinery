@@ -157,6 +157,9 @@ def run_daily(dry_run: bool = False, ticker: str | None = None) -> dict:
     mem.init_db()
     ctx = _get_market_context()
 
+    # Kickoff: orchestrator dispatches the scanner.
+    events.runner("orch", "scan", "#8B7FDD")
+
     # Full scan
     if ticker:
         # Single ticker mode for testing
@@ -178,6 +181,9 @@ def run_daily(dry_run: bool = False, ticker: str | None = None) -> dict:
             regime=ctx["regime"], vix=ctx["vix"]
         )
 
+    # Scanner hands its candidates to the TA agent.
+    events.runner("scan", "ta", "#2DAE85")
+
     # TA analysis on top candidates
     signals, ta_reasoning = ta_agent.analyze_batch(
         candidates=candidates,
@@ -185,12 +191,18 @@ def run_daily(dry_run: bool = False, ticker: str | None = None) -> dict:
         vix=ctx["vix"],
     )
 
+    # TA pulls historical ticker knowledge from the memory store.
+    events.runner("ta", "memory_db", "#4A8ADD")
+
     # Sentiment for signal tickers
     signal_tickers = [s["ticker"] for s in signals]
     sentiment_results, sent_reasoning = sentiment_agent.analyze_batch(
         tickers=signal_tickers,
         regime=ctx["regime"],
     )
+
+    # Sentiment hands its scores back to the TA workflow.
+    events.runner("senti", "ta", "#D86A40")
 
     # Attach sentiment scores to signals
     for signal in signals:
@@ -205,6 +217,9 @@ def run_daily(dry_run: bool = False, ticker: str | None = None) -> dict:
                 signal["trade_id"] = trade_id
             except Exception as e:
                 logger.error(f"Failed to save signal for {signal['ticker']}: {e}")
+
+    # Orchestrator delegates the portfolio check.
+    events.runner("orch", "port", "#8B7FDD")
 
     # Portfolio check
     port_analysis, port_reasoning = portfolio_agent.deep_analysis(
@@ -424,8 +439,16 @@ def run_weekly() -> dict:
         regime=ctx["regime"], vix=ctx["vix"]
     )
 
+    # The post-mortem agent walks over to the learning agent's desk to hand
+    # off resolved-trade data for this week's ratchet review.
+    events.agent_walk("pm", "learn", collab_ms=2000)
+
     # Learning review
     learning_review, learn_reasoning = learning_agent.weekly_review()
+
+    # The roster agent walks back to the orchestrator with this week's
+    # promotion / demotion proposals.
+    events.agent_walk("roster", "orch", collab_ms=1800)
 
     # Roster evaluation
     roster_proposals, roster_reasoning = roster_agent.evaluate()
