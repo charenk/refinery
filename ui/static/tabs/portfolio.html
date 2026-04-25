@@ -1,7 +1,43 @@
 <div class="card">
+  <div class="card-title">ADD HOLDING</div>
+  <form id="add-holding-form" style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:end;font-family:monospace;font-size:13px;">
+    <label style="display:flex;flex-direction:column;gap:2px;">
+      <span style="color:#6a6040;font-size:11px;letter-spacing:.05em;">TICKER</span>
+      <input name="ticker" type="text" required placeholder="AAPL" style="padding:6px;background:#1a1808;border:0.5px solid #3a3a20;color:#c8c0a0;border-radius:3px;font-family:monospace;text-transform:uppercase;">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:2px;">
+      <span style="color:#6a6040;font-size:11px;letter-spacing:.05em;">EXCHANGE</span>
+      <select name="exchange" style="padding:6px;background:#1a1808;border:0.5px solid #3a3a20;color:#c8c0a0;border-radius:3px;font-family:monospace;">
+        <option>NYSE</option>
+        <option>NASDAQ</option>
+        <option>TSX</option>
+        <option>OTHER</option>
+      </select>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:2px;">
+      <span style="color:#6a6040;font-size:11px;letter-spacing:.05em;">CURRENCY</span>
+      <select name="currency" style="padding:6px;background:#1a1808;border:0.5px solid #3a3a20;color:#c8c0a0;border-radius:3px;font-family:monospace;">
+        <option>USD</option>
+        <option>CAD</option>
+      </select>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:2px;">
+      <span style="color:#6a6040;font-size:11px;letter-spacing:.05em;">SHARES</span>
+      <input name="shares" type="number" min="0" step="any" required placeholder="10" style="padding:6px;background:#1a1808;border:0.5px solid #3a3a20;color:#c8c0a0;border-radius:3px;font-family:monospace;">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:2px;">
+      <span style="color:#6a6040;font-size:11px;letter-spacing:.05em;">AVG COST CAD</span>
+      <input name="avg_cost_cad" type="number" min="0" step="any" required placeholder="225.50" style="padding:6px;background:#1a1808;border:0.5px solid #3a3a20;color:#c8c0a0;border-radius:3px;font-family:monospace;">
+    </label>
+    <button type="submit" class="btn" style="font-size:13px;padding:6px 14px;">Add</button>
+  </form>
+  <div id="add-holding-feedback" style="margin-top:8px;font-family:monospace;font-size:12px;"></div>
+</div>
+
+<div class="card">
   <div style="display: flex; align-items: center; justify-content: space-between;">
     <div class="card-title">PORTFOLIO HOLDINGS</div>
-    <button class="btn" id="portfolio-refresh-btn" onclick="refreshPortfolioPrices()">Refresh</button>
+    <button class="btn" id="portfolio-refresh-btn" onclick="refreshPortfolioPrices()">Refresh prices</button>
   </div>
   <div id="portfolio-table-wrap">
     <table>
@@ -11,12 +47,10 @@
           <th>EXCHANGE</th>
           <th>SHARES</th>
           <th>AVG COST (CAD)</th>
-          <th>BOOK VALUE</th>
           <th>CURRENT PRICE</th>
           <th>P&L %</th>
           <th>CURRENCY</th>
-          <th>STOP</th>
-          <th>TARGET 1</th>
+          <th></th>
         </tr>
       </thead>
       <tbody id="portfolio-body"></tbody>
@@ -27,20 +61,22 @@
 
 <script>
 (function() {
+  function fmtPrice(value) {
+    return value == null ? '-' : '$' + Number(value).toFixed(2);
+  }
+
   function renderPortfolio(data) {
     var tbody = document.getElementById('portfolio-body');
     var summary = document.getElementById('portfolio-summary');
     tbody.innerHTML = '';
 
-    var totalBook = 0;
-    data.holdings.forEach(function(h) {
-      totalBook += h.book_value_cad;
-
+    var holdings = data.holdings || [];
+    holdings.forEach(function(h) {
       var priceCell = '-';
       if (h.current_price != null) {
-        priceCell = '$' + h.current_price.toFixed(2);
+        priceCell = '$' + Number(h.current_price).toFixed(2);
         if (h.current_price_cad != null && h.currency === 'USD') {
-          priceCell += ' <span style="color:#6a6040;font-size:12px">(C$' + h.current_price_cad.toFixed(2) + ')</span>';
+          priceCell += ' <span style="color:#6a6040;font-size:12px">(C$' + Number(h.current_price_cad).toFixed(2) + ')</span>';
         }
       }
 
@@ -54,24 +90,37 @@
       var tr = document.createElement('tr');
       tr.innerHTML =
         '<td style="color:#c8a050; font-weight:600">' + h.ticker + '</td>' +
-        '<td>' + h.exchange + '</td>' +
-        '<td>' + h.quantity.toFixed(4) + '</td>' +
-        '<td>$' + h.avg_cost_cad.toFixed(2) + '</td>' +
-        '<td>$' + h.book_value_cad.toLocaleString('en-CA', {minimumFractionDigits: 2}) + '</td>' +
+        '<td>' + (h.exchange || '') + '</td>' +
+        '<td>' + Number(h.shares || 0).toFixed(4) + '</td>' +
+        '<td>' + fmtPrice(h.avg_cost_cad) + '</td>' +
         '<td>' + priceCell + '</td>' +
         '<td>' + pnlCell + '</td>' +
-        '<td>' + h.currency + '</td>' +
-        '<td>' + (h.stop_cad ? '$' + h.stop_cad.toFixed(2) : '-') + '</td>' +
-        '<td>' + (h.target_1_cad ? '$' + h.target_1_cad.toFixed(2) : '-') + '</td>';
+        '<td>' + (h.currency || '') + '</td>' +
+        '<td><button class="btn-remove" data-ticker="' + h.ticker + '" style="background:transparent;border:0.5px solid #6a3030;color:#a85050;font-family:monospace;font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer;">Remove</button></td>';
       tbody.appendChild(tr);
     });
 
+    // Wire remove buttons
+    Array.from(tbody.querySelectorAll('.btn-remove')).forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        if (!confirm('Remove ' + btn.dataset.ticker + ' from your portfolio?')) return;
+        fetch('/api/portfolio/remove?ticker=' + encodeURIComponent(btn.dataset.ticker), {method: 'DELETE'})
+          .then(function(r) { return r.json(); })
+          .then(function() { loadPortfolio(); });
+      });
+    });
+
+    var totalBook = holdings.reduce(function(acc, h) {
+      var shares = Number(h.shares || 0);
+      var cost = Number(h.avg_cost_cad || 0);
+      return acc + (shares * cost);
+    }, 0);
     var usdLine = data.usd_cad ? ' | USD/CAD: ' + data.usd_cad.toFixed(4) : '';
+    var updated = data.last_updated ? ' | Updated: ' + data.last_updated : '';
     summary.textContent =
-      data.holdings.length + ' positions | Total book: $' +
-      totalBook.toLocaleString('en-CA', {minimumFractionDigits: 2}) +
-      usdLine +
-      ' | Updated: ' + data.last_updated;
+      holdings.length + ' position' + (holdings.length === 1 ? '' : 's') +
+      ' | Book value: $' + totalBook.toLocaleString('en-CA', {minimumFractionDigits: 2}) +
+      usdLine + updated;
   }
 
   window.loadPortfolio = function() {
@@ -88,14 +137,53 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         renderPortfolio(data);
-        btn.textContent = 'Refresh';
+        btn.textContent = 'Refresh prices';
         btn.style.opacity = '1';
       })
       .catch(function() {
-        btn.textContent = 'Refresh';
+        btn.textContent = 'Refresh prices';
         btn.style.opacity = '1';
       });
   };
+
+  // Add-holding form submit
+  var addForm = document.getElementById('add-holding-form');
+  var feedback = document.getElementById('add-holding-feedback');
+  addForm.addEventListener('submit', function(event) {
+    event.preventDefault();
+    feedback.textContent = '';
+    var formData = new FormData(addForm);
+    var payload = {
+      ticker: (formData.get('ticker') || '').toString().toUpperCase().trim(),
+      exchange: formData.get('exchange'),
+      currency: formData.get('currency'),
+      shares: Number(formData.get('shares')),
+      avg_cost_cad: Number(formData.get('avg_cost_cad'))
+    };
+    fetch('/api/portfolio/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    })
+      .then(function(r) {
+        return r.json().then(function(data) { return {ok: r.ok, data: data}; });
+      })
+      .then(function(result) {
+        if (result.ok && result.data.ok) {
+          feedback.style.color = '#4ade80';
+          feedback.textContent = 'Added ' + result.data.holding.ticker + '.';
+          addForm.reset();
+          loadPortfolio();
+        } else {
+          feedback.style.color = '#f87171';
+          feedback.textContent = result.data.error || 'Could not add holding.';
+        }
+      })
+      .catch(function(error) {
+        feedback.style.color = '#f87171';
+        feedback.textContent = 'Network error: ' + error;
+      });
+  });
 
   loadPortfolio();
 })();
