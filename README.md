@@ -22,16 +22,15 @@ cd refinery
 ./setup.sh
 ```
 
-The installer creates a virtualenv, pulls dependencies, copies templates, and initialises the SQLite store.
+The installer creates a virtualenv, pulls dependencies, initialises the SQLite store, and (if `.env` is missing) drops into a short wizard that asks for your Anthropic key and Gmail App Password. The Anthropic key is verified with a real one token call before anything is written to disk.
 
-Then:
+Verify any time with `python check.py`. The dashboard's Portfolio tab has a small form for adding holdings, so you do not need to hand edit JSON.
 
-1. Open `.env`. Paste your Anthropic key. Add the dedicated Gmail address as `SMTP_USER`, the App Password as `SMTP_PASSWORD`, and the inbox you want reports in as `TO_EMAIL`.
-2. Open `memory/portfolio.json`. Replace the example holding with yours. Tickers are uppercase. AAPL, VOO, ENB.TO.
-3. Pick how to run it.
-   * One report now: `python run_daily.py`.
-   * Schedule on the EST cadence: `python scheduler.py` and leave it running.
-   * Live dashboard: `cd ui && python app.py`, then visit `http://127.0.0.1:5173`.
+Then pick how to run it.
+
+* One report now: `python run_daily.py`.
+* Schedule on the EST cadence: `python scheduler.py` and leave it running.
+* Live dashboard: `cd ui && python app.py`, then visit `http://127.0.0.1:5173`.
 
 ## Dashboard
 
