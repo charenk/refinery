@@ -1,166 +1,52 @@
 # The Refinery
 
-> A small office of mathematicians who watch your portfolio and tell you what changed.
+Eight agents that watch a personal investment portfolio and email me what changed before the market opens. Lives on a laptop. Costs about ten cents a trading day in API calls.
 
-The Refinery is a local, multi-agent system that monitors a personal
-investment account and delivers three things:
+## What it does
 
-1. A **morning report** in your inbox before the market opens.
-2. **Event updates** during the day when something actually moves.
-3. **Pattern alerts** as macOS notifications when a holding crosses a
-   threshold worth your attention.
+Three things go out by mail or notification:
 
-It does not place trades. It observes and reports. The whole thing runs on
-your laptop, costs a few cents a day in API calls, and the source is yours
-to read and change.
+* A morning report at 8:15 AM ET. What macro did overnight, what the holdings are likely to react to, which watchlist names are setting up.
+* Midday and afternoon updates when a holding actually moves.
+* macOS notifications when a stock crosses a level the system tracks.
 
----
+It does not place trades. There is no brokerage integration anywhere in this repo. Market data comes from yfinance. Reasoning runs on Claude. Mail goes out through Gmail.
 
-## Quickstart
+## Setup
 
-```bash
+You need a Mac, Python 3.11 or newer, an Anthropic API key, and a Gmail account with a generated App Password.
+
+```
 git clone https://github.com/charenk/refinery.git
 cd refinery
 ./setup.sh
 ```
 
-Then edit `.env` (Anthropic API key, Gmail SMTP) and `memory/portfolio.json`
-(your holdings), and run:
+The installer creates a virtualenv, pulls dependencies, copies templates, and initialises the SQLite store.
 
-```bash
-python scheduler.py            # background scheduler
-cd ui && python app.py         # dashboard at http://127.0.0.1:5173
-```
+Then:
 
-To try it once before scheduling, run a dry-run report:
+1. Open `.env`. Paste your Anthropic key. Add the dedicated Gmail address as `SMTP_USER`, the App Password as `SMTP_PASSWORD`, and the inbox you want reports in as `TO_EMAIL`.
+2. Open `memory/portfolio.json`. Replace the example holding with yours. Tickers are uppercase. AAPL, VOO, ENB.TO.
+3. Pick how to run it.
+   * One report now: `python run_daily.py`.
+   * Schedule on the EST cadence: `python scheduler.py` and leave it running.
+   * Live dashboard: `cd ui && python app.py`, then visit `http://127.0.0.1:5173`.
 
-```bash
-python run_daily.py --dry-run  # prints today's brief, sends nothing
-python run_daily.py            # real run, emails the brief
-```
+## Dashboard
 
----
+A pixel office in the Severance house style. Eight agents at desks across two cubicle quartets, a Memory kiosk on the right, fluorescent ceiling, green carpet. The office animates from real socket events as scans run, so when the orchestrator dispatches the scanner you actually see a runner walk across the floor.
 
-## What you get
-
-### Morning report
-
-A pre-market brief that arrives in your inbox at 8:15 AM ET on weekdays.
-It contains:
-
-- The current market regime (trending, choppy, defensive) with the
-  evidence behind that call.
-- What overnight macro and global indices did, and what that implies for
-  the day.
-- Each of your holdings with a one-line read on what to watch for today
-  (catalyst proximity, level proximity, news flow).
-- New setups the system found in the watchlist, with entry zone, target,
-  stop, and a reasoning record.
-
-### Event updates
-
-Mid-day and end-of-day updates only when something material changes. Quiet
-days stay quiet. When an update fires, the email tells you what triggered
-it and what (if anything) you might want to do.
-
-### Pattern alerts
-
-When a stock you own or watch crosses a threshold the system tracks
-(volume spike, support break, resistance test, EMA cross), you get a
-macOS notification and an email. Maximum three per ticker per day so the
-phone never becomes noise.
-
----
-
-## Architecture
-
-```
-                     scheduler.py  (cron-like daemon)
-                          |
-                          v
-                     orchestrator
-                       /  |  \
-                      /   |   \
-                scanner   |   portfolio_agent
-                          |
-                  +-------+-------+
-                  |       |       |
-              ta_agent  sentiment_agent
-                  |       |       |
-                  +-------+-------+
-                          |
-                          v
-                    memory_agent
-                          |
-                          v
-                  memory/refinery.db
-                          |
-            (post-mortem and learning agents
-             run weekly off the same store)
-
-UI:  ui/app.py  serves http://127.0.0.1:5173 with five tabs:
-     Office . Morning Report . Portfolio . Roster . Performance
-```
-
-Nine agents in [agents/](agents/), shared utilities in [utils/](utils/),
-the dashboard in [ui/](ui/), and run entry points at the repo root
-([run_daily.py](run_daily.py), [run_overnight.py](run_overnight.py), and
-the rest).
-
----
-
-## Configuration
-
-| File | What it holds |
-|---|---|
-| [.env](.env.example) | Secrets: Anthropic key, SMTP credentials, recipient email |
-| [config.py](config.py) | Behaviour: ticker pools, schedule, thresholds, model tiers |
-| [memory/portfolio.json](memory/portfolio.example.json) | Your holdings (uses the example template on first run) |
-| [memory/refinery.db](memory/) | SQLite store the agents read and write |
-
-If you want to change *what* the system watches or *when* it runs, edit
-`config.py`. If you want to change *how* it reasons, the prompt for each
-agent is in `agents/<agent_name>.py:SYSTEM_PROMPT`.
-
----
-
-## Safety
-
-- **The Refinery does not place trades.** There is no brokerage
-  integration anywhere in this repo, and there will not be one. It is
-  observation and reporting only.
-- **Your portfolio data never leaves your machine** except in the
-  prompt sent to Anthropic when an agent reasons about it. If that
-  matters to you, audit `utils/claude_client.py` to see exactly what is
-  sent.
-- **The dashboard binds to 127.0.0.1 by default.** It is not reachable
-  from your local network unless you set `REFINERY_UI_HOST=0.0.0.0` in
-  the environment. Anyone who can reach the port can read your
-  portfolio.
-
-See [CLAUDE.md](CLAUDE.md) for the full set of conventions and security
-rules that govern contributions.
-
----
+Five tabs: Office, Morning Report, Portfolio, Roster, Performance.
 
 ## Cost
 
-Running the full daily schedule (overnight scan, 8:15 AM brief, mid-day
-check, EOD summary, weekly review) costs roughly **5 to 15 US cents per
-trading day** in Anthropic API charges, depending on how active your
-watchlist is. The scanner and pulse runs use Haiku; the heavier reasoning
-(TA, post-mortems, learning) uses Sonnet with prompt caching. Cost
-controls are documented in [config.py](config.py) under `MODELS`.
+Five to fifteen US cents per trading day in Anthropic charges. Heavy reasoning runs on Sonnet with prompt caching, lighter screens run on Haiku. Knobs live in `config.py` under `MODELS`.
 
----
+## Safety
+
+Observation only. The dashboard binds to localhost. Set `REFINERY_UI_HOST=0.0.0.0` in `.env` to expose it on your network, and accept that anyone on the same network can read your portfolio if you do.
 
 ## License
 
-[MIT](LICENSE) — fork it, ship your own version, just keep the notice.
-
-## Origin
-
-Extracted from a private project that powered the maintainer's own
-portfolio. The agent design and learning loop come from that work; the
-public release sanitises the data and reframes the product around a
-generic personal investor.
+MIT. See `LICENSE`. See `CLAUDE.md` for the conventions if you want to open a PR.
