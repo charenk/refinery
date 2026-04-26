@@ -67,6 +67,58 @@ def _write_json(path: str, data: dict) -> None:
         json.dump(data, file_handle, indent=2)
 
 
+def _update_env_file(updates: dict[str, str]) -> str:
+    """Atomically update `.env` with the given key->value pairs.
+
+    Preserves all existing keys, comments, and ordering. Adds new keys at
+    the end. Writes to a temp file then renames so a crash mid-write never
+    leaves a partial .env. Sets mode 600 on the result.
+
+    Returns the absolute path of the .env file written.
+    """
+    import tempfile
+
+    env_path = os.path.abspath(os.path.join(REPO_ROOT, ".env"))
+    existing_lines: list[str] = []
+    if os.path.exists(env_path):
+        with open(env_path) as file_handle:
+            existing_lines = file_handle.readlines()
+
+    # Walk lines: replace any key in updates, preserve everything else.
+    seen_keys: set[str] = set()
+    new_lines: list[str] = []
+    for raw_line in existing_lines:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            new_lines.append(raw_line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in updates:
+            new_lines.append(f"{key}={updates[key]}\n")
+            seen_keys.add(key)
+        else:
+            new_lines.append(raw_line)
+
+    # Append any keys that weren't already present.
+    for key, value in updates.items():
+        if key not in seen_keys:
+            new_lines.append(f"{key}={value}\n")
+
+    # Atomic write: temp file in the same directory, then rename.
+    fd, tmp_path = tempfile.mkstemp(prefix=".env.", dir=os.path.dirname(env_path))
+    try:
+        with os.fdopen(fd, "w") as tmp_handle:
+            tmp_handle.writelines(new_lines)
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, env_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return env_path
+
+
 # Tab routes ──────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -76,23 +128,42 @@ def serve_index():
 
 @app.route("/api/onboarding/status")
 def api_onboarding_status():
-    """Tells the UI what's missing so it can render appropriate prompts.
+    """Per-step onboarding state for the Setup tab.
 
-    Uses the validated loader so the placeholder holding (shares=0) does not
-    count as "configured". Never throws.
+    Returns presence flags only (no live API/SMTP pings, those happen on
+    Validate-and-Save). Never throws.
     """
+    from dotenv import load_dotenv
     from utils.portfolio_loader import load_portfolio
+
+    # Reload .env each call so the Setup tab sees writes immediately.
+    load_dotenv(override=True)
+
+    env_path = os.path.abspath(os.path.join(REPO_ROOT, ".env"))
+    has_env = os.path.exists(env_path)
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    has_anthropic_key = bool(anthropic_key) and anthropic_key.startswith("sk-ant-")
+
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip()
+    to_email = os.environ.get("TO_EMAIL", "").strip()
+    has_smtp = bool(smtp_user and smtp_password and to_email)
 
     validated = load_portfolio(PORTFOLIO_PATH)
     has_holdings = bool(validated.get("holdings"))
 
     has_briefs = bool(glob_module.glob(os.path.join(OUTPUTS_DIR, "*_brief.md")))
-    has_env = os.path.exists(os.path.join(REPO_ROOT, ".env"))
 
     return jsonify({
+        "has_env": has_env,
+        "has_anthropic_key": has_anthropic_key,
+        "has_smtp": has_smtp,
         "has_holdings": has_holdings,
         "has_briefs": has_briefs,
-        "has_env": has_env,
+        "env_path": env_path,
+        "smtp_user": smtp_user if has_smtp else "",
+        "to_email": to_email if has_smtp else "",
     })
 
 
@@ -219,6 +290,81 @@ def api_roster_pin():
             cat["pinned"].append(ticker)
     _write_json(ROSTER_PATH, roster)
     return jsonify({"ok": True})
+
+
+@app.route("/api/onboarding/credentials/anthropic", methods=["POST"])
+def api_onboarding_anthropic():
+    """Validate and persist the Anthropic API key.
+
+    Calls validate_anthropic_key (live 1-token ping) before writing. The key
+    is never echoed back in the response.
+    """
+    from utils.preflight import validate_anthropic_key
+
+    api_key = str((request.json or {}).get("api_key", "")).strip()
+    if not api_key:
+        return jsonify({"ok": False, "error": "API key is required."}), 400
+
+    ok, message = validate_anthropic_key(api_key)
+    if not ok:
+        return jsonify({"ok": False, "error": message}), 400
+
+    try:
+        _update_env_file({"ANTHROPIC_API_KEY": api_key})
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Could not write .env: {error}"}), 500
+
+    return jsonify({"ok": True, "message": message})
+
+
+@app.route("/api/onboarding/credentials/smtp", methods=["POST"])
+def api_onboarding_smtp():
+    """Validate and persist Gmail SMTP credentials.
+
+    Connects + authenticates against Gmail before writing. Sends a one-line
+    test email so the user knows it actually reached their inbox.
+    """
+    from utils.preflight import validate_smtp
+
+    body = request.json or {}
+    smtp_user = str(body.get("smtp_user", "")).strip()
+    smtp_password = str(body.get("smtp_password", "")).strip()
+    to_email = str(body.get("to_email", "")).strip() or smtp_user
+
+    if not (smtp_user and smtp_password and to_email):
+        return jsonify({"ok": False, "error": "Gmail address, App Password, and recipient are all required."}), 400
+
+    send_test = bool(body.get("send_test", True))
+    ok, message = validate_smtp(smtp_user, smtp_password, to_email, send_test=send_test)
+    if not ok:
+        return jsonify({"ok": False, "error": message}), 400
+
+    try:
+        _update_env_file({
+            "SMTP_USER": smtp_user,
+            "SMTP_PASSWORD": smtp_password,
+            "TO_EMAIL": to_email,
+        })
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Could not write .env: {error}"}), 500
+
+    return jsonify({"ok": True, "message": message})
+
+
+@app.route("/api/onboarding/scan", methods=["POST"])
+def api_onboarding_scan():
+    """Trigger the morning scan from the Setup tab. Same as the Office button."""
+    def execute_scan():
+        try:
+            from agents.orchestrator import run_daily
+            run_daily(dry_run=False)
+        except Exception as error:
+            events.log("system", f"Scan error: {error}")
+        finally:
+            events.scan_complete()
+
+    socketio.start_background_task(execute_scan)
+    return jsonify({"ok": True, "message": "Scan started. Watch the Office tab for the agents."})
 
 
 @app.route("/api/portfolio/add", methods=["POST"])

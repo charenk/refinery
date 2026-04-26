@@ -10,13 +10,17 @@
 <body>
   <nav class="tab-nav">
     <div class="nav-logo">The Refinery</div>
-    <button class="tab-btn active" onclick="showTab('office', this)">Office</button>
-    <button class="tab-btn" onclick="showTab('brief', this)">Morning Report</button>
-    <button class="tab-btn" onclick="showTab('portfolio', this)">Portfolio</button>
-    <button class="tab-btn" onclick="showTab('roster', this)">Roster</button>
-    <button class="tab-btn" onclick="showTab('performance', this)">Performance</button>
+    <button class="tab-btn" id="tab-btn-setup" onclick="showTab('setup', this)" style="display:none;">
+      Setup <span id="setup-badge" style="background:#fbbf24;color:#1a1808;padding:0 5px;border-radius:8px;font-size:10px;margin-left:4px;font-weight:700;">!</span>
+    </button>
+    <button class="tab-btn active" id="tab-btn-office" onclick="showTab('office', this)">Office</button>
+    <button class="tab-btn" id="tab-btn-brief" onclick="showTab('brief', this)">Morning Report</button>
+    <button class="tab-btn" id="tab-btn-portfolio" onclick="showTab('portfolio', this)">Portfolio</button>
+    <button class="tab-btn" id="tab-btn-roster" onclick="showTab('roster', this)">Roster</button>
+    <button class="tab-btn" id="tab-btn-performance" onclick="showTab('performance', this)">Performance</button>
   </nav>
   <main>
+    <div id="tab-setup" class="tab-panel"></div>
     <div id="tab-office" class="tab-panel active"></div>
     <div id="tab-brief" class="tab-panel"></div>
     <div id="tab-portfolio" class="tab-panel"></div>
@@ -37,7 +41,7 @@
       document.getElementById('tab-' + name).classList.add('active');
       if (btn) btn.classList.add('active');
 
-      // Lazy-load tab content
+      // Lazy-load tab content (office is rendered by office.js, no html file)
       if (!loaded[name] && name !== 'office') {
         loaded[name] = true;
         fetch('tabs/' + name + '.html')
@@ -53,6 +57,23 @@
           });
       }
     }
+
+    /* ── Setup tab visibility + auto-select on landing ───────── */
+    fetch('/api/onboarding/status')
+      .then(r => r.ok ? r.json() : null)
+      .then(status => {
+        if (!status) return;
+        var pending = !status.has_anthropic_key || !status.has_smtp || !status.has_holdings;
+        var setupBtn = document.getElementById('tab-btn-setup');
+        if (pending) {
+          setupBtn.style.display = '';
+          // Auto-select Setup so non-technical users see what's missing
+          showTab('setup', setupBtn);
+        } else {
+          setupBtn.style.display = 'none';
+        }
+      })
+      .catch(function () { /* fail silent */ });
   </script>
 </body>
 </html>
