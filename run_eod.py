@@ -8,6 +8,8 @@ from agents.orchestrator import run_eod
 from utils import email_client, notify, report_builder
 
 def main():
+    from utils.preflight import run_or_die
+    run_or_die()
     result = run_eod()
 
     html = report_builder.build_eod_html(result)

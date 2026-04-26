@@ -8,6 +8,8 @@ from agents.orchestrator import run_weekly
 from utils import email_client, notify, report_builder
 
 def main():
+    from utils.preflight import run_or_die
+    run_or_die()
     result = run_weekly()
 
     html = report_builder.build_weekly_html(result)

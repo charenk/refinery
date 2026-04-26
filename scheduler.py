@@ -64,6 +64,11 @@ def _run_if_weekday(name: str) -> None:
 
 def main():
     from config import SCHEDULE
+    from utils.preflight import run_or_die
+
+    # Daemon-level preflight: if these fail we want loud failure now, not at
+    # 6:30 AM tomorrow when no one is watching.
+    run_or_die()
 
     logger.info("Refinery Scheduler starting")
     logger.info(f"Timezone: {SCHEDULE['timezone']}")

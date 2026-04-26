@@ -9,6 +9,8 @@ from agents.orchestrator import run_overnight
 from utils import email_client, notify, report_builder
 
 def main():
+    from utils.preflight import run_or_die
+    run_or_die()
     result = run_overnight()
 
     html = report_builder.build_overnight_html(result)

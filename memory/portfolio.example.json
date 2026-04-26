@@ -1,21 +1,16 @@
 {
-  "_comment": "Copy this file to memory/portfolio.json and replace the holdings with your own. Refinery never reads this .example file at runtime; it is a template only.",
+  "_comment": "Copy this file to memory/portfolio.json and add your holdings via the Portfolio tab in the UI (or by editing this JSON directly). The .example file is never read at runtime.",
+  "_holding_shape": {
+    "ticker": "AAPL",
+    "exchange": "NASDAQ",
+    "currency": "USD",
+    "shares": 10,
+    "avg_cost_cad": 225.50,
+    "notes": "optional"
+  },
   "last_updated": null,
   "currency": "CAD",
   "account": "Personal",
   "cash_available": 0.00,
-  "holdings": [
-    {
-      "_comment": "Remove this example holding before adding real ones.",
-      "ticker": "VOO",
-      "exchange": "NYSE",
-      "currency": "USD",
-      "shares": 0,
-      "avg_cost_cad": 0.00,
-      "date_entered": "2026-01-01",
-      "target_cad": 0.00,
-      "stop_cad": 0.00,
-      "notes": "Example placeholder"
-    }
-  ]
+  "holdings": []
 }

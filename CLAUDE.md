@@ -74,12 +74,27 @@ Read these before writing code in this repo.
 ### Module boundaries
 
 - All SQLite access goes through `agents/memory_agent.py`. No other file
-  imports `sqlite3`.
+  imports `sqlite3` (preflight is the one allowed exception, since its job
+  is to inspect the DB at the schema level).
 - All Anthropic API calls go through `utils/claude_client.py`. No other file
-  imports `anthropic`.
-- All emails go through `utils/email_client.py`.
+  imports `anthropic` (preflight is the one allowed exception, since its
+  job is to send the validation ping).
+- All emails go through `utils/email_client.py` (preflight does its own SMTP
+  for the same reason).
 - All macOS notifications go through `utils/notify.py`.
 - All `portfolio.json` reads go through `utils/portfolio_loader.py`.
+
+### Preflight
+
+Every `run_*.py` and `scheduler.py` must call `utils.preflight.run_or_die()`
+at the very top of `main()`. This catches missing credentials and a
+broken database before any agent runs, so a misconfigured install fails
+with a one line message instead of a stack trace from inside an agent
+loop.
+
+`python check.py` runs the same validators interactively and prints a
+colour coded checklist. Use `--send-email` to also fire a one line test
+email through SMTP.
 
 ### Configuration
 

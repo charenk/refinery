@@ -9,10 +9,15 @@ memory/refinery.db-journal
 memory/refinery.db-wal
 memory/refinery.db-shm
 memory/portfolio.json
+memory/roster.json
 memory/strategy_experiments.json
 memory/market_regime.json
 outputs/*
 !outputs/.gitkeep
+
+# Local-only artifacts (launch planning, demo data loader)
+launch/
+load_demo.py
 
 # Python
 .venv/

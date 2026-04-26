@@ -1,0 +1,371 @@
+<style>
+  .setup-wrap { max-width: 720px; margin: 0 auto; font-family: monospace; }
+  .setup-header { color: #c8a050; font-size: 18px; margin-bottom: 4px; letter-spacing: .03em; }
+  .setup-subtitle { color: #8a8a60; font-size: 13px; margin-bottom: 24px; }
+  .setup-step { background: #161610; border: 1px solid #2a2a1a; border-radius: 6px; padding: 16px 18px; margin-bottom: 12px; transition: border-color .15s; }
+  .setup-step.done { border-color: #2a4a2a; }
+  .setup-step.pending { border-color: #5e5e30; }
+  .setup-step.locked { opacity: .45; pointer-events: none; }
+  .setup-step-row { display: flex; align-items: flex-start; gap: 12px; }
+  .setup-icon { font-size: 16px; line-height: 1.2; min-width: 22px; }
+  .setup-icon.done { color: #4ade80; }
+  .setup-icon.pending { color: #fbbf24; }
+  .setup-icon.locked { color: #4a4a30; }
+  .setup-step-body { flex: 1; }
+  .setup-step-title { color: #c8c0a0; font-size: 14px; font-weight: 600; margin-bottom: 2px; letter-spacing: .02em; }
+  .setup-step-help { color: #8a8a60; font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
+  .setup-step-help a { color: #4A8ADD; text-decoration: none; }
+  .setup-step-help a:hover { text-decoration: underline; }
+  .setup-form { display: grid; gap: 8px; }
+  .setup-form label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: #6a6040; letter-spacing: .04em; }
+  .setup-form input { padding: 7px 9px; background: #1a1808; border: 1px solid #3a3a20; color: #e0e0d8; border-radius: 3px; font-family: monospace; font-size: 13px; }
+  .setup-form input:focus { outline: none; border-color: #6a6040; }
+  .setup-form-row { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+  .setup-form-row .btn { font-size: 13px; padding: 7px 14px; }
+  .setup-feedback { font-size: 12px; min-height: 16px; }
+  .setup-feedback.ok { color: #4ade80; }
+  .setup-feedback.err { color: #f87171; }
+  .setup-feedback.busy { color: #c8a050; }
+  .setup-env-note { color: #5a5a40; font-size: 11px; margin-top: 8px; font-style: italic; }
+  .setup-env-note code { color: #8a8a60; background: #1a1808; padding: 1px 4px; border-radius: 2px; }
+  .setup-complete { background: #1a2a14; border: 1px solid #4a7a3a; color: #86efac; padding: 16px; border-radius: 6px; margin-bottom: 16px; }
+  .setup-complete-title { color: #4ade80; font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+</style>
+
+<div class="setup-wrap">
+  <div class="setup-header">Welcome to The Refinery</div>
+  <div class="setup-subtitle" id="setup-subtitle">A few steps and you'll get your first morning report tomorrow.</div>
+
+  <div id="setup-complete-card" class="setup-complete" style="display:none;">
+    <div class="setup-complete-title">All set.</div>
+    <div>You can switch to the Office tab to watch the agents at work, or run a scan now using step 5 below.</div>
+  </div>
+
+  <!-- Step 1: install -->
+  <div class="setup-step done" id="step-install">
+    <div class="setup-step-row">
+      <div class="setup-icon done">✓</div>
+      <div class="setup-step-body">
+        <div class="setup-step-title">1. Install</div>
+        <div class="setup-step-help">The app is installed and running on your laptop. Nothing to do here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Anthropic key -->
+  <div class="setup-step" id="step-anthropic">
+    <div class="setup-step-row">
+      <div class="setup-icon" id="step-anthropic-icon">⏳</div>
+      <div class="setup-step-body">
+        <div class="setup-step-title">2. Add your AI key</div>
+        <div class="setup-step-help">
+          The Refinery reads the markets using Claude AI. You need a key from Anthropic.
+          New accounts get free credit, plenty for weeks of testing.
+          <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Get a key →</a>
+        </div>
+        <div id="step-anthropic-form-wrap">
+          <form class="setup-form" id="step-anthropic-form">
+            <label>
+              ANTHROPIC API KEY
+              <input name="api_key" type="password" required placeholder="sk-ant-...">
+            </label>
+            <div class="setup-form-row">
+              <button type="submit" class="btn" id="step-anthropic-submit">Validate and save</button>
+              <span class="setup-feedback" id="step-anthropic-feedback"></span>
+            </div>
+          </form>
+          <div class="setup-env-note" id="step-anthropic-envnote"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: SMTP -->
+  <div class="setup-step" id="step-smtp">
+    <div class="setup-step-row">
+      <div class="setup-icon" id="step-smtp-icon">⏳</div>
+      <div class="setup-step-body">
+        <div class="setup-step-title">3. Connect your email</div>
+        <div class="setup-step-help">
+          So the morning report can land in your inbox. We use Gmail.
+          You'll need a 16 character "App Password" from Google (it's free, separate from your normal password).
+          <a href="https://support.google.com/accounts/answer/185833" target="_blank" rel="noopener">How to make one →</a>
+        </div>
+        <div id="step-smtp-form-wrap">
+          <form class="setup-form" id="step-smtp-form">
+            <label>
+              GMAIL ADDRESS
+              <input name="smtp_user" type="email" required placeholder="you@gmail.com">
+            </label>
+            <label>
+              APP PASSWORD
+              <input name="smtp_password" type="password" required placeholder="16 character code from Google">
+            </label>
+            <label>
+              SEND REPORTS TO
+              <input name="to_email" type="email" placeholder="leave blank to use the address above">
+            </label>
+            <div class="setup-form-row">
+              <button type="submit" class="btn" id="step-smtp-submit">Validate and save</button>
+              <span class="setup-feedback" id="step-smtp-feedback"></span>
+            </div>
+          </form>
+          <div class="setup-env-note" id="step-smtp-envnote"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4: holdings -->
+  <div class="setup-step locked" id="step-holdings">
+    <div class="setup-step-row">
+      <div class="setup-icon locked" id="step-holdings-icon">🔒</div>
+      <div class="setup-step-body">
+        <div class="setup-step-title">4. Add a stock you own</div>
+        <div class="setup-step-help">
+          Tell the system what's in your portfolio. The morning report will analyse each holding,
+          flag risks, and watch for setups against the wider market.
+        </div>
+        <form class="setup-form" id="step-holdings-form">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;">
+            <label>
+              TICKER
+              <input name="ticker" type="text" required placeholder="AAPL" style="text-transform:uppercase;">
+            </label>
+            <label>
+              EXCHANGE
+              <select name="exchange" style="padding:7px;background:#1a1808;border:1px solid #3a3a20;color:#e0e0d8;border-radius:3px;font-family:monospace;font-size:13px;">
+                <option>NYSE</option>
+                <option>NASDAQ</option>
+                <option>TSX</option>
+              </select>
+            </label>
+            <label>
+              SHARES
+              <input name="shares" type="number" min="0" step="any" required placeholder="10">
+            </label>
+            <label>
+              AVG COST CAD
+              <input name="avg_cost_cad" type="number" min="0" step="any" required placeholder="225.50">
+            </label>
+          </div>
+          <div class="setup-form-row">
+            <button type="submit" class="btn">Add holding</button>
+            <span class="setup-feedback" id="step-holdings-feedback"></span>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 5: first scan -->
+  <div class="setup-step locked" id="step-scan">
+    <div class="setup-step-row">
+      <div class="setup-icon locked" id="step-scan-icon">🔒</div>
+      <div class="setup-step-body">
+        <div class="setup-step-title">5. Run your first morning report</div>
+        <div class="setup-step-help">
+          Test the whole pipeline. The agents will analyse your holdings and email you a report.
+          Switch to the Office tab while it runs to watch them work.
+        </div>
+        <div class="setup-form-row">
+          <button type="button" class="btn" id="step-scan-btn">Run scan now</button>
+          <span class="setup-feedback" id="step-scan-feedback"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var $ = function(id) { return document.getElementById(id); };
+
+  function setStepState(stepId, iconChar, stateClass) {
+    var step = $('step-' + stepId);
+    var icon = $('step-' + stepId + '-icon');
+    if (!step || !icon) return;
+    step.classList.remove('done', 'pending', 'locked');
+    step.classList.add(stateClass);
+    icon.classList.remove('done', 'pending', 'locked');
+    icon.classList.add(stateClass === 'done' ? 'done' : (stateClass === 'pending' ? 'pending' : 'locked'));
+    icon.textContent = iconChar;
+  }
+
+  function setFeedback(elId, text, kind) {
+    var el = $(elId);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'setup-feedback ' + (kind || '');
+  }
+
+  function loadStatus() {
+    return fetch('/api/onboarding/status').then(function(r) { return r.json(); });
+  }
+
+  function renderStatus(status) {
+    var allDone = status.has_anthropic_key && status.has_smtp && status.has_holdings;
+    $('setup-complete-card').style.display = allDone ? 'block' : 'none';
+    $('setup-subtitle').textContent = allDone
+      ? "Everything is configured. Run your first scan when you're ready."
+      : "A few steps and you'll get your first morning report tomorrow.";
+
+    // Anthropic
+    if (status.has_anthropic_key) {
+      setStepState('anthropic', '✓', 'done');
+      $('step-anthropic-form-wrap').style.display = 'none';
+    } else {
+      setStepState('anthropic', '⚠', 'pending');
+      $('step-anthropic-form-wrap').style.display = 'block';
+      $('step-anthropic-envnote').innerHTML =
+        'Or paste it directly into <code>' + status.env_path + '</code> next to <code>ANTHROPIC_API_KEY=</code>.';
+    }
+
+    // SMTP
+    if (status.has_smtp) {
+      setStepState('smtp', '✓', 'done');
+      $('step-smtp-form-wrap').style.display = 'none';
+    } else {
+      setStepState('smtp', '⚠', 'pending');
+      $('step-smtp-form-wrap').style.display = 'block';
+      $('step-smtp-envnote').innerHTML =
+        'Or set <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, and <code>TO_EMAIL</code> directly in <code>' + status.env_path + '</code>.';
+    }
+
+    // Holdings (locked until 2 + 3 done)
+    var holdingsReady = status.has_anthropic_key && status.has_smtp;
+    if (status.has_holdings) {
+      setStepState('holdings', '✓', 'done');
+      var holdingsForm = $('step-holdings-form');
+      if (holdingsForm) holdingsForm.style.display = 'none';
+    } else if (holdingsReady) {
+      setStepState('holdings', '⚠', 'pending');
+    } else {
+      setStepState('holdings', '🔒', 'locked');
+    }
+
+    // Scan (locked until 4 done)
+    if (status.has_holdings) {
+      setStepState('scan', '⚠', 'pending');
+    } else {
+      setStepState('scan', '🔒', 'locked');
+    }
+
+    return status;
+  }
+
+  function refresh() {
+    return loadStatus().then(renderStatus);
+  }
+
+  // Anthropic submit
+  $('step-anthropic-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+    var apiKey = event.target.api_key.value.trim();
+    if (!apiKey) return;
+    setFeedback('step-anthropic-feedback', 'Pinging Claude with a 1 token request...', 'busy');
+    $('step-anthropic-submit').disabled = true;
+    fetch('/api/onboarding/credentials/anthropic', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({api_key: apiKey})
+    })
+      .then(function(r) { return r.json().then(function(data) { return {ok: r.ok, data: data}; }); })
+      .then(function(result) {
+        $('step-anthropic-submit').disabled = false;
+        if (result.data.ok) {
+          setFeedback('step-anthropic-feedback', '✓ ' + result.data.message + '. Saved.', 'ok');
+          event.target.reset();
+          setTimeout(refresh, 400);
+        } else {
+          setFeedback('step-anthropic-feedback', result.data.error || 'Failed.', 'err');
+        }
+      })
+      .catch(function(err) {
+        $('step-anthropic-submit').disabled = false;
+        setFeedback('step-anthropic-feedback', 'Network error: ' + err, 'err');
+      });
+  });
+
+  // SMTP submit
+  $('step-smtp-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+    var fd = new FormData(event.target);
+    var payload = {
+      smtp_user: (fd.get('smtp_user') || '').trim(),
+      smtp_password: (fd.get('smtp_password') || '').trim(),
+      to_email: (fd.get('to_email') || '').trim()
+    };
+    if (!payload.smtp_user || !payload.smtp_password) return;
+    setFeedback('step-smtp-feedback', 'Connecting to Gmail and sending a test email...', 'busy');
+    $('step-smtp-submit').disabled = true;
+    fetch('/api/onboarding/credentials/smtp', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    })
+      .then(function(r) { return r.json().then(function(data) { return {ok: r.ok, data: data}; }); })
+      .then(function(result) {
+        $('step-smtp-submit').disabled = false;
+        if (result.data.ok) {
+          setFeedback('step-smtp-feedback', '✓ ' + result.data.message + '. Saved.', 'ok');
+          event.target.reset();
+          setTimeout(refresh, 400);
+        } else {
+          setFeedback('step-smtp-feedback', result.data.error || 'Failed.', 'err');
+        }
+      })
+      .catch(function(err) {
+        $('step-smtp-submit').disabled = false;
+        setFeedback('step-smtp-feedback', 'Network error: ' + err, 'err');
+      });
+  });
+
+  // Holdings submit (mirrors the Portfolio tab's form)
+  $('step-holdings-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+    var fd = new FormData(event.target);
+    var payload = {
+      ticker: (fd.get('ticker') || '').toString().toUpperCase().trim(),
+      exchange: fd.get('exchange'),
+      currency: fd.get('exchange') === 'TSX' ? 'CAD' : 'USD',
+      shares: Number(fd.get('shares')),
+      avg_cost_cad: Number(fd.get('avg_cost_cad'))
+    };
+    setFeedback('step-holdings-feedback', '', '');
+    fetch('/api/portfolio/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    })
+      .then(function(r) { return r.json().then(function(data) { return {ok: r.ok, data: data}; }); })
+      .then(function(result) {
+        if (result.data.ok) {
+          setFeedback('step-holdings-feedback', '✓ Added ' + result.data.holding.ticker + '.', 'ok');
+          event.target.reset();
+          setTimeout(refresh, 300);
+        } else {
+          setFeedback('step-holdings-feedback', result.data.error || 'Failed.', 'err');
+        }
+      });
+  });
+
+  // Scan
+  $('step-scan-btn').addEventListener('click', function() {
+    setFeedback('step-scan-feedback', 'Starting scan... switch to the Office tab to watch.', 'busy');
+    $('step-scan-btn').disabled = true;
+    fetch('/api/onboarding/scan', {method: 'POST'})
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        $('step-scan-btn').disabled = false;
+        if (data.ok) {
+          setFeedback('step-scan-feedback', data.message, 'ok');
+        } else {
+          setFeedback('step-scan-feedback', data.error || 'Failed to start.', 'err');
+        }
+      });
+  });
+
+  refresh();
+})();
+</script>

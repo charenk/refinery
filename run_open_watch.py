@@ -8,6 +8,8 @@ from agents.orchestrator import run_open_watch
 from utils import email_client, notify
 
 def main():
+    from utils.preflight import run_or_die
+    run_or_die()
     result = run_open_watch()
 
     triggered = result.get("watch_triggered", [])

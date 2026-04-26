@@ -16,6 +16,12 @@ def main():
     parser.add_argument("--ticker", type=str, help="Analyze a single ticker instead of full scan")
     args = parser.parse_args()
 
+    from utils.preflight import run_or_die
+    run_or_die(
+        require_anthropic=not args.mock,
+        require_smtp=not args.dry_run,
+    )
+
     if args.mock:
         claude_client.set_mock_mode(True)
         print("[MOCK MODE] Using simulated Claude responses, no API calls will be made.")
