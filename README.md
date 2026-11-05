@@ -47,6 +47,10 @@ Five to fifteen US cents per trading day in Anthropic charges. Heavy reasoning r
 
 Observation only. The dashboard binds to localhost. Set `REFINERY_UI_HOST=0.0.0.0` in `.env` to expose it on your network, and accept that anyone on the same network can read your portfolio if you do.
 
+## Visuals
+
+A screenshot of the Severance-style office dashboard (or a sample morning report) belongs here. Until then, run `cd ui && python app.py` and open `http://127.0.0.1:5173` after setup.
+
 ## License
 
 MIT. See `LICENSE`. See `CLAUDE.md` for the conventions if you want to open a PR.
